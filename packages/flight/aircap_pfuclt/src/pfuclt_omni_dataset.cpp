@@ -124,9 +124,9 @@ Robot::Robot(ros::NodeHandle& nh, RobotFactory* parent, ParticleFilter* pf,
       robotNamespace + "/orangeball3Dposition", 10,
       boost::bind(&Robot::targetCallback, this, _1));
 
-  sLandmark_ = nh.subscribe<read_omni_dataset::LRMLandmarksData>(
-      robotNamespace + "/landmarkspositions", 10,
-      boost::bind(&Robot::landmarkDataCallback, this, _1));
+  // sLandmark_ = nh.subscribe<read_omni_dataset::LRMLandmarksData>(
+  //     robotNamespace + "/landmarkspositions", 10,
+  //     boost::bind(&Robot::landmarkDataCallback, this, _1));
 
   ROS_INFO("Created robot OMNI%d", robotNumber + 1);
 }
@@ -393,12 +393,12 @@ int main(int argc, char* argv[])
   readParam<int>(nh, "MAX_ROBOTS", MAX_ROBOTS);
   readParam<float>(nh, "ROB_HT", ROB_HT);
   readParam<int>(nh, "NUM_TARGETS", NUM_TARGETS);
-  readParam<int>(nh, "NUM_LANDMARKS", NUM_LANDMARKS);
-  readParam<float>(nh, "LANDMARK_COV/K1", K1);
-  readParam<float>(nh, "LANDMARK_COV/K2", K2);
-  readParam<float>(nh, "LANDMARK_COV/K3", K3);
-  readParam<float>(nh, "LANDMARK_COV/K4", K4);
-  readParam<float>(nh, "LANDMARK_COV/K5", K5);
+  // readParam<int>(nh, "NUM_LANDMARKS", NUM_LANDMARKS);
+  // readParam<float>(nh, "LANDMARK_COV/K1", K1);
+  // readParam<float>(nh, "LANDMARK_COV/K2", K2);
+  // readParam<float>(nh, "LANDMARK_COV/K3", K3);
+  // readParam<float>(nh, "LANDMARK_COV/K4", K4);
+  // readParam<float>(nh, "LANDMARK_COV/K5", K5);
   readParam<bool>(nh, "PLAYING_ROBOTS", PLAYING_ROBOTS);
   readParam<double>(nh, "POS_INIT", POS_INIT);
   readParam<bool>(nh, "USE_CUSTOM_VALUES", USE_CUSTOM_VALUES);
@@ -426,7 +426,7 @@ int main(int argc, char* argv[])
     return EXIT_FAILURE;
   }
 
-  Factory.initializeFixedLandmarks();
+  // Factory.initializeFixedLandmarks();
 
   ros::spin();
   return EXIT_SUCCESS;

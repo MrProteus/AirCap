@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>pfuclt_omni_dataset</name>
+  <name>aircap_pfuclt</name>
   <version>0.0.2</version>
   <description>This is a ROS package to systematically read sensor msgs from the omni-dataset (soccer robots dataset) and perform PF-UCLT on it.</description>
   <maintainer email="guilherme.lawless@gmail.com">Guilherme Lawless</maintainer>

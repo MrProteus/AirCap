@@ -730,13 +730,13 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
   // Check if we should activate robotRandom
   // Only if no landmarks and no target seen
   uint nLandmarksSeen = 0;
-  for (std::vector<LandmarkObservation>::iterator it =
-           bufLandmarkObservations_[robotNumber].begin();
-       it != bufLandmarkObservations_[robotNumber].end(); ++it)
-  {
-    if (it->found)
-      nLandmarksSeen++;
-  }
+  // for (std::vector<LandmarkObservation>::iterator it =
+  //          bufLandmarkObservations_[robotNumber].begin();
+  //      it != bufLandmarkObservations_[robotNumber].end(); ++it)
+  // {
+  //   if (it->found)
+  //     nLandmarksSeen++;
+  // }
 
   if (nLandmarksSeen == 0 && !bufTargetObservations_[robotNumber].found)
   {
@@ -759,7 +759,7 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
 
     // All the PF-UCLT steps
     predictTarget();
-    fuseRobots();
+    // fuseRobots();
     fuseTarget();
     resample();
     estimate();
