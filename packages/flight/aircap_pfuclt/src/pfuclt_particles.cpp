@@ -12,13 +12,10 @@ ParticleFilter::ParticleFilter(struct PFinitData& data)
       nh_(data.nh), nParticles_((uint)dynamicVariables_.nParticles), mainRobotID_(data.mainRobotID - 1),
       nTargets_(data.nTargets), nStatesPerRobot_(data.statesPerRobot), nRobots_(data.nRobots),
       nSubParticleSets_(data.nTargets * STATES_PER_TARGET + data.nRobots * data.statesPerRobot + 1),
-      nLandmarks_(data.nLandmarks),
       particles_(nSubParticleSets_, subparticles_t(nParticles_)),
       weightComponents_(data.nRobots, subparticles_t(nParticles_, 0.0)),
       seed_(time(0)), initialized_(false),
-      landmarksMap_(data.landmarksMap),
       robotsUsed_(data.robotsUsed),
-      bufLandmarkObservations_(data.nRobots, std::vector<LandmarkObservation>(data.nLandmarks)),
       bufTargetObservations_(data.nRobots),
       durationSum(ros::WallDuration(0)),
       numberIterations(0),
@@ -128,138 +125,7 @@ void ParticleFilter::predictTarget()
   }
 }
 
-void ParticleFilter::fuseRobots()
-{
-  *iteration_oss << "fuseRobots() -> ";
 
-  // Save the latest observation time to be used when publishing
-  savedLatestObservationTime_ = latestObservationTime_;
-
-  // Keeps track of number of landmarks seen for each robot
-  std::vector<uint> landmarksSeen(nRobots_, 0);
-
-  // Will track the probability propagation based on the landmark observations
-  // for each robot
-  std::vector<subparticles_t> probabilities(nRobots_,
-                                            subparticles_t(nParticles_, 1.0));
-
-  // For every robot
-  for (uint r = 0; r < nRobots_; ++r)
-  {
-    // If not used, skip
-    if (false == robotsUsed_[r])
-      continue;
-
-    // Index offset for this robot in the particles vector
-    uint o_robot = r * nStatesPerRobot_;
-
-    // For every landmark
-    for (uint l = 0; l < nLandmarks_; ++l)
-    {
-      // If landmark not seen, skip
-      if (false == bufLandmarkObservations_[r][l].found)
-        continue;
-      else
-        ++(landmarksSeen[r]);
-
-      // Reference to the observation for easier access
-      LandmarkObservation& m = bufLandmarkObservations_[r][l];
-
-      // Observation in robot frame
-      Eigen::Matrix<pdata_t, 2, 1> Zrobot(m.x, m.y);
-
-      // Landmark in global frame
-      Eigen::Matrix<pdata_t, 2, 1> LMglobal(landmarksMap_[l].x,
-                                            landmarksMap_[l].y);
-
-#pragma omp parallel for
-      for (uint p = 0; p < nParticles_; ++p)
-      {
-
-        // Robot pose <=> frame
-        Eigen::Rotation2D<pdata_t> Rrobot(-particles_[o_robot + O_THETA][p]);
-        Eigen::Matrix<pdata_t, 2, 1> Srobot(particles_[o_robot + O_X][p],
-                                            particles_[o_robot + O_Y][p]);
-
-        // Landmark to robot frame
-        Eigen::Matrix<pdata_t, 2, 1> LMrobot = Rrobot * (LMglobal - Srobot);
-
-        // Error in observation
-        Eigen::Matrix<pdata_t, 2, 1> Zerr = LMrobot - Zrobot;
-
-        // The values of interest to the particle weights
-        // Note: using Eigen wasn't of particular interest here since it does
-        // not allow for transposing a non-dynamic matrix
-        float expArg = -0.5 * (Zerr(O_X) * Zerr(O_X) / m.covXX +
-                               Zerr(O_Y) * Zerr(O_Y) / m.covYY);
-        float detValue = 1.0; // pow((2 * M_PI * m.covXX * m.covYY), -0.5);
-
-        /*
-        ROS_DEBUG_COND(
-            p == 0,
-            "OMNI%d's particle 0 is at {%f;%f;%f}, sees landmark %d with "
-            "certainty %f%%, and error {%f;%f}",
-            r + 1, particles_[o_robot + O_X][p], particles_[o_robot + O_Y][p],
-            particles_[o_robot + O_THETA][p], l, 100 * (detValue * exp(expArg)),
-            Zerr(0), Zerr(1));
-        */
-
-        // Update weight component for this robot and particular particle
-        probabilities[r][p] *= detValue * exp(expArg);
-      }
-    }
-  }
-
-  // Reset weights, later will be multiplied by weightComponents of each robot
-  resetWeights(1.0);
-
-  // Duplicate particles
-  particles_t dupParticles(particles_);
-
-  for (uint r = 0; r < nRobots_; ++r)
-  {
-    // Again, if robot not used, skip
-    if (false == robotsUsed_[r])
-      continue;
-
-    // Check that at least one landmark was seen, if not send warning
-    // If seen use probabilities vector, if not keep using the previous
-    // weightComponents for this robot
-    if (0 == landmarksSeen[r])
-    {
-      ROS_WARN("In this iteration, OMNI%d didn't see any landmarks", r + 1);
-
-      // weightComponent stays from previous iteration
-    }
-
-    else
-    {
-      weightComponents_[r] = probabilities[r];
-    }
-
-    // Index offset for this robot in the particles vector
-    uint o_robot = r * nStatesPerRobot_;
-
-    // Create a vector of indexes according to a descending order of the weights
-    // components of robot r
-    std::vector<uint> sorted = order_index<pdata_t>(weightComponents_[r], DESC);
-
-    // For every particle
-    for (uint p = 0; p < nParticles_; ++p)
-    {
-      // Re-order the particle subsets of this robot
-      uint sort_index = sorted[p];
-
-      // Copy this sub-particle set from dupParticles' sort_index particle
-      copyParticle(particles_, dupParticles, p, sort_index, o_robot,
-                   o_robot + nStatesPerRobot_ - 1);
-
-      // Update the particle weight (will get multiplied nRobots times and get a
-      // lower value)
-      particles_[O_WEIGHT][p] *= weightComponents_[r][sort_index];
-    }
-  }
-}
 
 void ParticleFilter::fuseTarget()
 {
@@ -789,10 +655,6 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
   }
 }
 
-void ParticleFilter::saveAllLandmarkMeasurementsDone(const uint robotNumber)
-{
-  *iteration_oss << "allLandmarks(OMNI" << robotNumber + 1 << ") -> ";
-}
 
 void ParticleFilter::saveAllTargetMeasurementsDone(const uint robotNumber)
 {

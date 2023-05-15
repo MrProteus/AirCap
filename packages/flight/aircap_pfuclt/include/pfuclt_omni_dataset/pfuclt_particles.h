@@ -165,9 +165,8 @@ public:
   struct PFinitData
   {
     ros::NodeHandle& nh;
-    const uint mainRobotID, nTargets, statesPerRobot, nRobots, nLandmarks;
+    const uint mainRobotID, nTargets, statesPerRobot, nRobots;
     const std::vector<bool>& robotsUsed;
-    const std::vector<Landmark>& landmarksMap;
 
     /**
      * @brief PFinitData
@@ -187,12 +186,10 @@ public:
      */
     PFinitData(ros::NodeHandle& nh, const uint mainRobotID, const uint nTargets,
                const uint statesPerRobot, const uint nRobots,
-               const uint nLandmarks, const std::vector<bool>& robotsUsed,
-               const std::vector<Landmark>& landmarksMap)
+               const std::vector<bool>& robotsUsed)
         : nh(nh), mainRobotID(mainRobotID), nTargets(nTargets),
           statesPerRobot(statesPerRobot), nRobots(nRobots),
-          nLandmarks(nLandmarks), robotsUsed(robotsUsed),
-          landmarksMap(landmarksMap)
+          robotsUsed(robotsUsed)
     {
     }
   };
@@ -205,14 +202,11 @@ protected:
   const uint nStatesPerRobot_;
   const uint nRobots_;
   const uint nSubParticleSets_;
-  const uint nLandmarks_;
   particles_t particles_;
   particles_t weightComponents_;
   RNGType seed_;
   bool initialized_;
-  const std::vector<Landmark>& landmarksMap_;
   const std::vector<bool>& robotsUsed_;
-  std::vector<std::vector<LandmarkObservation> > bufLandmarkObservations_;
   std::vector<TargetObservation> bufTargetObservations_;
   TimeEval targetIterationTime_, odometryTime_;
   ros::WallTime iterationEvalTime_;
@@ -456,43 +450,6 @@ public:
    * @return - the number of subparticle sets
    */
   std::size_t size() { return nSubParticleSets_; }
-
-  /**
-   * @brief saveLandmarkObservation - saves the landmark observation to a buffer
-   * of
-   * observations
-   * @param robotNumber - the robot number in the team
-   * @param landmarkNumber - the landmark serial id
-   * @param obs - the observation data as a structure defined in this file
-   */
-  inline void saveLandmarkObservation(const uint robotNumber,
-                                      const uint landmarkNumber,
-                                      const LandmarkObservation obs,
-                                      ros::Time stamp)
-  {
-    bufLandmarkObservations_[robotNumber][landmarkNumber] = obs;
-    latestObservationTime_ = stamp;
-  }
-
-  /**
-   * @brief saveLandmarkObservation - change the measurement buffer state
-   * @param robotNumber - the robot number in the team
-   * @param found - whether this landmark has been found
-   */
-  inline void saveLandmarkObservation(const uint robotNumber,
-                                      const uint landmarkNumber,
-                                      const bool found)
-  {
-    bufLandmarkObservations_[robotNumber][landmarkNumber].found = found;
-  }
-
-  /**
-   * @brief saveAllLandmarkMeasurementsDone - call this function when all
-   * landmark measurements have
-   * been performed by a certain robot
-   * @param robotNumber - the robot number performing the measurements
-   */
-  void saveAllLandmarkMeasurementsDone(const uint robotNumber);
 
   /**
    * @brief saveTargetObservation - saves the target observation to a buffer of

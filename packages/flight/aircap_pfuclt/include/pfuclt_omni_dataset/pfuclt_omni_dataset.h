@@ -9,7 +9,6 @@
 #include <ros/ros.h>
 #include <nav_msgs/Odometry.h>
 #include <read_omni_dataset/BallData.h>
-#include <read_omni_dataset/LRMLandmarksData.h>
 
 // Eigen libraries
 #include <eigen3/Eigen/Core>
@@ -70,12 +69,6 @@ public:
    */
   void tryInitializeParticles();
 
-  /**
-   * @brief initializeFixedLandmarks - will get a filename from the parameter
-   * server, and use its information to store landmark positions in the
-   * landmarks vector
-   */
-  void initializeFixedLandmarks();
 };
 
 /**
@@ -90,7 +83,7 @@ protected:
   ParticleFilter* pf_;
   bool started_;
   ros::Time timeStarted_;
-  ros::Subscriber sOdom_, sBall_, sLandmark_;
+  ros::Subscriber sOdom_, sBall_;
   uint robotNumber_;
   Eigen::Isometry2d initPose_; // x y theta;
 
@@ -123,12 +116,6 @@ public:
    */
   void targetCallback(const read_omni_dataset::BallData::ConstPtr&);
 
-  /**
-   * @brief landmarkDataCallback - event-driven function which should be called
-   * when new landmark data is received
-   */
-  void
-  landmarkDataCallback(const read_omni_dataset::LRMLandmarksData::ConstPtr&);
 
   /**
    * @brief hasStarted

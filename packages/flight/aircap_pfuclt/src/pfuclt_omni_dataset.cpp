@@ -32,8 +32,7 @@ ros::Time timeInit;
 RobotFactory::RobotFactory(ros::NodeHandle& nh) : nh_(nh)
 {
   ParticleFilter::PFinitData initData(nh, MY_ID, NUM_TARGETS, STATES_PER_ROBOT,
-                                      MAX_ROBOTS, NUM_LANDMARKS, PLAYING_ROBOTS,
-                                      landmarks);
+                                      MAX_ROBOTS, PLAYING_ROBOTS);
 
   if (PUBLISH)
     pf = boost::shared_ptr<PFPublisher>(
@@ -62,32 +61,7 @@ void RobotFactory::tryInitializeParticles()
   pf->init(CUSTOM_PARTICLE_INIT, POS_INIT);
 }
 
-void RobotFactory::initializeFixedLandmarks()
-{
-  std::string filename;
 
-  // get the filename from parameter server
-  if (!readParam<std::string>(nh_, "LANDMARKS_CONFIG", filename))
-    return;
-
-  // parse the file and copy to vector of Landmarks
-  landmarks = getLandmarks(filename.c_str());
-  ROS_ERROR_COND(landmarks.empty(), "Couldn't open file \"%s\"",
-                 filename.c_str());
-
-  ROS_ERROR_COND((int)landmarks.size() != NUM_LANDMARKS,
-                 "Read a number of landmarks different from the specified in "
-                 "NUM_LANDMARKS");
-
-  // iterate over the vector and print information
-  for (std::vector<Landmark>::iterator it = landmarks.begin();
-       it != landmarks.end(); ++it)
-  {
-    ROS_INFO("A fixed landmark with ID %d at position {x=%.2f, y=%.2f} \twas "
-             "created",
-             it->serial, it->x, it->y);
-  }
-}
 
 bool RobotFactory::areAllRobotsActive()
 {
@@ -213,136 +187,10 @@ void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
 
   // If this is the "self robot", update the iteration time
   if (MY_ID == (int)robotNumber_ + 1)
-    pf_->updateTargetIterationTime(target->header.stamp);
-}
-
-void Robot::landmarkDataCallback(
-    const read_omni_dataset::LRMLandmarksData::ConstPtr& landmarkData)
-{
-  //  ROS_DEBUG("OMNI%d landmark data at time %d", robotNumber_ + 1,
-  //            landmarkData->header.stamp.sec);
-
-  bool heuristicsFound[NUM_LANDMARKS];
-  for (int i = 0; i < NUM_LANDMARKS; i++)
-    heuristicsFound[i] = landmarkData->found[i];
-
-  float distances[NUM_LANDMARKS];
-
-  // d = sqrt(x^2+y^2)
-  for (int i = 0; i < NUM_LANDMARKS; i++)
-  {
-    distances[i] =
-        pow((pow(landmarkData->x[i], 2) + pow(landmarkData->y[i], 2)), 0.5);
-  }
-
-  // Define heuristics if using custom values
-  if (USE_CUSTOM_VALUES)
-  {
-    // Huristic 1. If I see only 8 and not 9.... then I cannot see 7
-    if (landmarkData->found[8] && !landmarkData->found[9])
-      heuristicsFound[7] = false;
-
-    // Huristic 2. If I see only 9 and not 8.... then I cannot see 6
-    if (!landmarkData->found[8] && landmarkData->found[9])
-      heuristicsFound[6] = false;
-
-    // Huristic 3. If I see both 8 and 9.... then there are 2 subcases
-    if (landmarkData->found[8] && landmarkData->found[9])
-    {
-      // Huristic 3.1. If I am closer to 9.... then I cannot see 6
-      if (distances[9] < distances[8])
-        heuristicsFound[6] = false;
-
-      // Huristic 3.2 If I am closer to 8.... then I cannot see 7
-      if (distances[8] < distances[9])
-        heuristicsFound[7] = false;
+    pf_->updateTargetIterationTime(msg->header.stamp);
     }
 
-    float heuristicsThresh[] = HEURISTICS_THRESH_DEFAULT;
 
-    if (robotNumber_ == 0)
-    {
-      heuristicsThresh[4] = 6.5;
-      heuristicsThresh[5] = 6.5;
-      heuristicsThresh[8] = 6.5;
-      heuristicsThresh[9] = 6.5;
-    }
-
-    else if (robotNumber_ == 2)
-    {
-      heuristicsThresh[4] = 6.5;
-      heuristicsThresh[5] = 6.5;
-      heuristicsThresh[8] = 6.5;
-      heuristicsThresh[9] = 6.5;
-    }
-
-    else if (robotNumber_ == 3)
-    {
-      heuristicsThresh[4] = 6.5;
-      heuristicsThresh[5] = 6.5;
-      heuristicsThresh[8] = 6.5;
-      heuristicsThresh[9] = 6.5;
-    }
-
-    else if (robotNumber_ == 4)
-    {
-      heuristicsThresh[4] = 3.5;
-      heuristicsThresh[5] = 3.5;
-      heuristicsThresh[8] = 3.5;
-      heuristicsThresh[9] = 3.5;
-    }
-
-    // Set landmark as not found if distance to it is above a certain threshold
-    for (int i = 0; i < NUM_LANDMARKS; i++)
-    {
-      if (distances[i] > heuristicsThresh[i])
-        heuristicsFound[i] = false;
-    }
-  }
-
-  // End of heuristics, below uses the array but just for convenience
-
-  for (int i = 0; i < NUM_LANDMARKS; i++)
-  {
-
-    if (false == heuristicsFound[i])
-      pf_->saveLandmarkObservation(robotNumber_, i, false);
-
-    else
-    {
-      LandmarkObservation obs;
-      obs.found = true;
-      obs.x = landmarkData->x[i];
-      obs.y = landmarkData->y[i];
-      obs.d = sqrt(obs.x * obs.x + obs.y * obs.y);
-
-      // If needed, this hack goes over the dataset threshold distance
-//      if (obs.d > 2.0)
-//      {
-//        pf_->saveLandmarkObservation(robotNumber_, i, false);
-//        continue;
-//      }
-
-      obs.phi = atan2(obs.y, obs.x);
-      obs.covDD =
-          (K1 * fabs(1.0 - (landmarkData->AreaLandMarkActualinPixels[i] /
-                            landmarkData->AreaLandMarkExpectedinPixels[i]))) *
-          (obs.d * obs.d);
-      obs.covPP = NUM_LANDMARKS * K2 * (1 / (obs.d + 1));
-      obs.covXX = pow(cos(obs.phi), 2) * obs.covDD +
-                  pow(sin(obs.phi), 2) *
-                      (pow(obs.d, 2) * obs.covPP + obs.covDD * obs.covPP);
-      obs.covYY = pow(sin(obs.phi), 2) * obs.covDD +
-                  pow(cos(obs.phi), 2) *
-                      (pow(obs.d, 2) * obs.covPP + obs.covDD * obs.covPP);
-
-      pf_->saveLandmarkObservation(robotNumber_, i, obs,
-                                   landmarkData->header.stamp);
-    }
-  }
-
-  pf_->saveAllLandmarkMeasurementsDone(robotNumber_);
-}
 
 // end of namespace pfuclt_omni_dataset
 }
@@ -393,12 +241,8 @@ int main(int argc, char* argv[])
   readParam<int>(nh, "MAX_ROBOTS", MAX_ROBOTS);
   readParam<float>(nh, "ROB_HT", ROB_HT);
   readParam<int>(nh, "NUM_TARGETS", NUM_TARGETS);
-  // readParam<int>(nh, "NUM_LANDMARKS", NUM_LANDMARKS);
-  // readParam<float>(nh, "LANDMARK_COV/K1", K1);
-  // readParam<float>(nh, "LANDMARK_COV/K2", K2);
-  // readParam<float>(nh, "LANDMARK_COV/K3", K3);
-  // readParam<float>(nh, "LANDMARK_COV/K4", K4);
-  // readParam<float>(nh, "LANDMARK_COV/K5", K5);
+
+  
   readParam<bool>(nh, "PLAYING_ROBOTS", PLAYING_ROBOTS);
   readParam<double>(nh, "POS_INIT", POS_INIT);
   readParam<bool>(nh, "USE_CUSTOM_VALUES", USE_CUSTOM_VALUES);
