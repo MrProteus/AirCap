@@ -15,7 +15,6 @@ ParticleFilter::ParticleFilter(struct PFinitData& data)
       particles_(nSubParticleSets_, subparticles_t(nParticles_)),
       weightComponents_(data.nRobots, subparticles_t(nParticles_, 0.0)),
       seed_(time(0)), initialized_(false),
-      robotsUsed_(data.robotsUsed),
       bufTargetObservations_(data.nRobots),
       durationSum(ros::WallDuration(0)),
       numberIterations(0),
@@ -181,7 +180,7 @@ void ParticleFilter::fuseTarget()
       // Observations of the target by all robots
       for (r = 0; r < nRobots_; ++r)
       {
-        if (false == robotsUsed_[r] || false == bufTargetObservations_[r].found)
+        if (false == bufTargetObservations_[r].found)
           continue;
 
         // Usefull variables
@@ -307,8 +306,6 @@ void ParticleFilter::resample()
 
   for (uint r = 0; r < nRobots_; ++r)
   {
-    if (false == robotsUsed_[r])
-      continue;
 
     uint o_robot = r * nStatesPerRobot_;
 
@@ -393,11 +390,8 @@ void ParticleFilter::estimate()
   // For each robot
   for (uint r = 0; r < nRobots_; ++r)
   {
-    // If the robot isn't playing, skip it
-    if (false == robotsUsed_[r])
-      continue;
 
-    uint o_robot = r * nStatesPerRobot_;
+   uint o_robot = r * nStatesPerRobot_;
 
     // A vector of weighted means that will be calculated in the next loop
     std::vector<double> weightedMeans(nStatesPerRobot_ - 1, 0.0);

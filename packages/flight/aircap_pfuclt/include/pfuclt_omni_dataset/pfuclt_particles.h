@@ -166,7 +166,6 @@ public:
   {
     ros::NodeHandle& nh;
     const uint mainRobotID, nTargets, statesPerRobot, nRobots;
-    const std::vector<bool>& robotsUsed;
 
     /**
      * @brief PFinitData
@@ -177,16 +176,12 @@ public:
      * @param nTargets - the number of targets to consider
      * @param statesPerRobot - the state space dimension for each robot
      * @param nRobots - number of robots
-     * @param robotsUsed - vector of bools mentioning if robots are being used,
-     * according to the standard robot ordering
      * @param vector with values to be used in the RNG for the model sampling
      */
     PFinitData(ros::NodeHandle& nh, const uint mainRobotID, const uint nTargets,
-               const uint statesPerRobot, const uint nRobots,
-               const std::vector<bool>& robotsUsed)
+               const uint statesPerRobot, const uint nRobots)
         : nh(nh), mainRobotID(mainRobotID), nTargets(nTargets),
-          statesPerRobot(statesPerRobot), nRobots(nRobots),
-          robotsUsed(robotsUsed)
+          statesPerRobot(statesPerRobot), nRobots(nRobots)
     {
     }
   };
@@ -203,7 +198,6 @@ protected:
   particles_t weightComponents_;
   RNGType seed_;
   bool initialized_;
-  const std::vector<bool>& robotsUsed_;
   std::vector<TargetObservation> bufTargetObservations_;
   TimeEval targetIterationTime_, odometryTime_;
   ros::WallTime iterationEvalTime_;

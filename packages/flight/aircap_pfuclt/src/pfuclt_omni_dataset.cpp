@@ -11,7 +11,6 @@ int MY_ID;
 int MAX_ROBOTS;
 int NUM_TARGETS;
 int NUM_LANDMARKS;
-std::vector<bool> PLAYING_ROBOTS;
 float K1, K2; // coefficients for landmark observation covariance
 float K3, K4, K5; // coefficients for target observation covariance
 float ROB_HT; // Fixed height of the robots above ground in meters
@@ -32,7 +31,7 @@ ros::Time timeInit;
 RobotFactory::RobotFactory(ros::NodeHandle& nh) : nh_(nh)
 {
   ParticleFilter::PFinitData initData(nh, MY_ID, NUM_TARGETS, STATES_PER_ROBOT,
-                                      MAX_ROBOTS, PLAYING_ROBOTS);
+                                      MAX_ROBOTS);
 
   if (PUBLISH)
     pf = boost::shared_ptr<PFPublisher>(
@@ -267,8 +266,6 @@ int main(int argc, char* argv[])
   readParam<int>(nh, "NUM_TARGETS", NUM_TARGETS);
 
 
-  PLAYING_ROBOTS.resize(MAX_ROBOTS);
-  PLAYING_ROBOTS.assign(MAX_ROBOTS,1);
   readParam<bool>(nh, "USE_CUSTOM_VALUES", USE_CUSTOM_VALUES);
   readParam<int>(nh, "MY_ID", MY_ID);
 

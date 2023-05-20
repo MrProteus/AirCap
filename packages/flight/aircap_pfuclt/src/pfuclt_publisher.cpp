@@ -82,8 +82,6 @@ void PFPublisher::publishParticles() {
 
     // Also send as a series of PoseArray messages for each robot
     for (uint r = 0; r < nRobots_; ++r) {
-        if (false == robotsUsed_[r])
-            continue;
 
         uint o_robot = r * nStatesPerRobot_;
         geometry_msgs::PoseArray msgStd_particles;
@@ -124,8 +122,6 @@ void PFPublisher::publishParticles() {
 void PFPublisher::publishRobotStates() {
     // This is pretty much copy and paste
     for (uint r = 0; r < nRobots_; ++r) {
-        if (false == robotsUsed_[r])
-            continue;
 
         std::ostringstream robotName;
         robotName << "machine_" << r + 1;
@@ -200,9 +196,6 @@ void PFPublisher::publishTargetObservations() {
     for (uint r = 0; r < nRobots_; ++r) {
         // Publish as rviz standard visualization types (an arrow)
         visualization_msgs::Marker marker;
-
-        if (!robotsUsed_[r])
-            continue;
 
         // Robot and observation
         std::ostringstream robotName;
