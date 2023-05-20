@@ -177,11 +177,8 @@ public:
      * @param nTargets - the number of targets to consider
      * @param statesPerRobot - the state space dimension for each robot
      * @param nRobots - number of robots
-     * @param nLandmarks - number of landmarks
      * @param robotsUsed - vector of bools mentioning if robots are being used,
      * according to the standard robot ordering
-     * @param landmarksMap - vector of Landmark structs containing information
-     * on the landmark locations
      * @param vector with values to be used in the RNG for the model sampling
      */
     PFinitData(ros::NodeHandle& nh, const uint mainRobotID, const uint nTargets,

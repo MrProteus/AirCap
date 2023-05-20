@@ -1,4 +1,4 @@
-#include <read_omni_dataset/read_omni_dataset.h> // defines version of messages
+#include <aircap_pfuclt/read_omni_dataset.h> // defines version of messages
 #include <pfuclt_omni_dataset/pfuclt_publisher.h>
 
 namespace pfuclt_omni_dataset {
@@ -17,49 +17,51 @@ PFPublisher::PFPublisher(struct ParticleFilter::PFinitData &data,
             "/gtData_4robotExp", 10,
             boost::bind(&PFPublisher::gtDataCallback, this, _1));
 
+    std::string robotNamespace("/machine_" +
+                        boost::lexical_cast<std::string>(data.mainRobotID));
+
     // Other publishers
     estimatePublisher_ =
-            nh_.advertise<read_omni_dataset::Estimate>("/pfuclt_estimate", 100);
+            nh_.advertise<read_omni_dataset::Estimate>(robotNamespace + "/pf/pfuclt_estimate", 100);
     particlePublisher_ =
-            nh_.advertise<pfuclt_omni_dataset::particles>("/pfuclt_particles", 10);
+            nh_.advertise<pfuclt_omni_dataset::particles>(robotNamespace + "/pf/pfuclt_particles", 10);
 
     // Rviz visualization publishers
     // Target
     targetEstimatePublisher_ =
-            nh_.advertise<geometry_msgs::PointStamped>("/target/estimatedPose", 1000);
+            nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/estimatedPose", 1000);
     targetGTPublisher_ =
-            nh_.advertise<geometry_msgs::PointStamped>("/target/gtPose", 1000);
+            nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/gtPose", 1000);
     targetParticlePublisher_ =
-            nh_.advertise<sensor_msgs::PointCloud>("/target/particles", 10);
+            nh_.advertise<sensor_msgs::PointCloud>(robotNamespace + "/pf/target/particles", 10);
 
     // target observations publisher
     targetObservationsPublisher_ =
-            nh_.advertise<visualization_msgs::Marker>("/targetObservations", 100);
+            nh_.advertise<visualization_msgs::Marker>(robotNamespace + "/pf/targetObservations", 100);
 
     // Robots
     for (uint r = 0; r < nRobots_; ++r) {
-        std::ostringstream robotName;
-        robotName << "omni" << r + 1;
+        std::string robotName("/machine_" + boost::lexical_cast<std::string>(r + 1));
 
-        // particle publisher
-        particleStdPublishers_[r] = nh_.advertise<geometry_msgs::PoseArray>(
-                "/" + robotName.str() + "/particles", 1000);
+    // particle publisher
+    particleStdPublishers_[r] = nh_.advertise<geometry_msgs::PoseArray>(
+            robotNamespace + "/pf/" + robotName + "/particles", 1000);
 
-        // estimated state
-        robotEstimatePublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
-                "/" + robotName.str() + "/estimatedPose", 1000);
+    // estimated state
+    robotEstimatePublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
+            robotNamespace + "/pf/" + robotName + "/estimatedPose", 1000);
 
-        // build estimate msg
-        msg_estimate_.robotEstimates.push_back(geometry_msgs::Pose());
-        msg_estimate_.targetVisibility.push_back(false);
+    // build estimate msg
+    msg_estimate_.robotEstimates.push_back(geometry_msgs::Pose());
+    msg_estimate_.targetVisibility.push_back(false);
 
 // ground truth publisher, in the simulation package we have PoseStamped
 #ifndef USE_NEWER_READ_OMNI_PACKAGE
-        robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PointStamped>(
-                "/" + robotName.str() + "/gtPose", 1000);
+    robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PointStamped>(
+            robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
 #else
-        robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
-                "/" + robotName.str() + "/gtPose", 1000);
+    robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
+            robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
 #endif
     }
 
@@ -126,7 +128,7 @@ void PFPublisher::publishRobotStates() {
             continue;
 
         std::ostringstream robotName;
-        robotName << "omni" << r + 1;
+        robotName << "machine_" << r + 1;
 
         msg_estimate_.header.stamp = savedLatestObservationTime_;
 

@@ -8,7 +8,7 @@
 // ROS message definitions
 #include <ros/ros.h>
 #include <nav_msgs/Odometry.h>
-#include <read_omni_dataset/BallData.h>
+#include <aircap_pfuclt/BallData.h>
 
 // Eigen libraries
 #include <eigen3/Eigen/Core>
@@ -23,6 +23,9 @@
 #include <pfuclt_omni_dataset/pfuclt_aux.h>
 #include <pfuclt_omni_dataset/pfuclt_particles.h>
 #include <pfuclt_omni_dataset/pfuclt_publisher.h>
+
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <uav_msgs/uav_pose.h>
 
 namespace pfuclt_omni_dataset
 {
@@ -108,20 +111,22 @@ public:
    * @brief odometryCallback - event-driven function which should be called when
    * new odometry data is received
    */
-  void odometryCallback(const nav_msgs::Odometry::ConstPtr&);
+  void odometryCallback(const uav_msgs::uav_pose::ConstPtr&);
 
   /**
    * @brief targetCallBack - event-driven function which should be called when
    * new target data is received
    */
-  void targetCallback(const read_omni_dataset::BallData::ConstPtr&);
+  void targetCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr&);
 
 
   /**
    * @brief hasStarted
    * @return
    */
-  bool hasStarted() { return started_; }
+  bool hasStarted() { return started_; }; 
+
+  std::vector<double> selfPosInit;
 };
 
 // end of namespace pfuclt_omni_dataset

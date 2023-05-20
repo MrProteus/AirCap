@@ -152,6 +152,8 @@ namespace target_tracker_distributed_kf {
             ros::Publisher targetPub_;
             ros::Publisher targetVelPub_;
             ros::Publisher offsetPub_;
+            ros::Publisher pfOdometryPub_;
+            ros::Publisher pfTargetPub_;
 
             geometry_msgs::PoseWithCovarianceStamped msg_;
             geometry_msgs::TwistWithCovarianceStamped velMsg_;
@@ -170,6 +172,9 @@ namespace target_tracker_distributed_kf {
 
             void predictAndPublish(const uav_msgs::uav_poseConstPtr&);
             void publishStateAndCov(const CacheElement&);
+
+            void pfPublishMeasurement(const PoseWithCovarianceStamped&);
+            void pfPublishOdometry(const uav_msgs::uav_poseConstPtr &pose);
 
         protected:
             static constexpr auto state_size = 9;

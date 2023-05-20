@@ -620,6 +620,7 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
   // If this is the main robot, perform one PF-UCLT iteration
   if (mainRobotID_ == robotNumber)
   {
+    ROS_DEBUG("ParticleFilter::Predict: Full iteration started");
     // Lock mutex
     boost::mutex::scoped_lock(mutex_);
 
@@ -629,6 +630,7 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
     fuseTarget();
     resample();
     estimate();
+    ROS_DEBUG("Full iteration complete");
 
     ROS_INFO("(WALL TIME) Odometry analyzed with = %fms",
              1e3 * odometryTime_.diff);

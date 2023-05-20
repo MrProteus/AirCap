@@ -45,6 +45,14 @@ namespace target_tracker_distributed_kf {
         string offset_topic{"target_tracker/offset"};
         pnh_.getParam("offset_topic", offset_topic);
         offsetPub_ = nh_.advertise<PoseWithCovarianceStamped>(offset_topic, 10);
+        
+        // advertise odometry topic for particle filter
+        string odometry_topic{"pf/odometry"};
+        pfOdometryPub_ = nh_.advertise<uav_msgs::uav_pose>(odometry_topic,10);
+
+        // advertise target topic for particle filter
+        string target_topic{"pf/orangeBall3DPosition"};
+        pfTargetPub_ = nh_.advertise<PoseWithCovarianceStamped>(target_topic,10);
 
         ROS_INFO_STREAM("Publishing to " << targetPub_.getTopic());
         ROS_INFO_STREAM("Offset Publishing to " << offsetPub_.getTopic());
@@ -185,6 +193,11 @@ namespace target_tracker_distributed_kf {
         //   ROS_INFO_STREAM(state_cache_);
         //}
 
+        pfPublishMeasurement(msg);
+    }
+
+    void DistributedKF3D::pfPublishMeasurement(const PoseWithCovarianceStamped &msg) {
+        pfTargetPub_.publish(msg);
     }
 
     void DistributedKF3D::setUnknownInitial(CacheElement &elem) {
@@ -389,6 +402,12 @@ namespace target_tracker_distributed_kf {
 
         //    ROS_INFO("Predict and Publish");
         publishStateAndCov(tmp_element);
+
+        pfPublishOdometry(pose);
+    }
+
+    void DistributedKF3D::pfPublishOdometry(const uav_msgs::uav_poseConstPtr &pose) {
+        pfOdometryPub_.publish(pose);
     }
 
     void DistributedKF3D::initializeStaticMatrices() {
@@ -535,7 +554,7 @@ namespace target_tracker_distributed_kf {
            msg_.pose.covariance[2 * 6 + 2] = 1e-4;
            */
 
-        offsetPub_.publish(msg_);
+        offsetPub_.publish(msg_);   
 
         // Debug - output full state
         //    ROS_INFO_STREAM("Full state at time " << ros::Time::now() << std::endl << elem.state << std::endl << "And covariance " << std::endl << elem.cov);

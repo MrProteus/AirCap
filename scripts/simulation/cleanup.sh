@@ -13,5 +13,5 @@ killall ssd_server.bin
 killall ssd_server.sh
 
 # lets get a bit more drastic
-pkill -f ros/indigo
-pkill -f /home/dementor/catkin_ws
+pkill -f ros/noetic
+pkill -f /home/friedrich/catkin_ws

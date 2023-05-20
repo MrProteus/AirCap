@@ -45,19 +45,25 @@ RobotFactory::RobotFactory(ros::NodeHandle& nh) : nh_(nh)
 
   for (int rn = 0; rn < MAX_ROBOTS; rn++)
   {
-    if (PLAYING_ROBOTS[rn])
-    {
-      robots_.push_back(
-          Robot_ptr(new Robot(nh_, this, pf->getPFReference(), rn)));
-    }
+    robots_.push_back(
+      Robot_ptr(new Robot(nh_, this, pf->getPFReference(), rn)));
   }
 }
 
 void RobotFactory::tryInitializeParticles()
 {
-  if (!areAllRobotsActive())
+  ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::tryInitializeParticles: Trying to initialize particles");
+  if (!areAllRobotsActive()){
+    ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::tryInitializeParticles: Robots are active");
     return;
-
+  }
+  for (std::vector<Robot_ptr>::iterator it = robots_.begin();
+       it != robots_.end(); ++it)
+  {
+    POS_INIT.insert(POS_INIT.end(),(*it)->selfPosInit.begin(),(*it)->selfPosInit.end());
+  }
+  ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::tryInitializeParticles: Robots are not active! Initializing now");
+  
   pf->init(CUSTOM_PARTICLE_INIT, POS_INIT);
 }
 
@@ -76,6 +82,10 @@ bool RobotFactory::areAllRobotsActive()
 
 void Robot::startNow()
 {
+  if (selfPosInit.empty()) {
+    ROS_WARN("Robot::startNow (Robot %i): selfPosInit is empty, don't start yet",robotNumber_);
+    return;
+  }
   timeStarted_ = ros::Time::now();
   started_ = true;
   ROS_INFO("OMNI%d has started %.2fs after the initial time", robotNumber_ + 1,
@@ -86,16 +96,16 @@ Robot::Robot(ros::NodeHandle& nh, RobotFactory* parent, ParticleFilter* pf,
              uint robotNumber)
     : parent_(parent), pf_(pf), started_(false), robotNumber_(robotNumber)
 {
-  std::string robotNamespace("/omni" +
+  std::string robotNamespace("/machine_" +
                              boost::lexical_cast<std::string>(robotNumber + 1));
 
   // Subscribe to topics
-  sOdom_ = nh.subscribe<nav_msgs::Odometry>(
-      robotNamespace + "/odometry", 10,
+  sOdom_ = nh.subscribe<uav_msgs::uav_pose>(
+      robotNamespace + "/pf/odometry", 10,
       boost::bind(&Robot::odometryCallback, this, _1));
 
-  sBall_ = nh.subscribe<read_omni_dataset::BallData>(
-      robotNamespace + "/orangeball3Dposition", 10,
+  sBall_ = nh.subscribe<geometry_msgs::PoseWithCovarianceStamped>(
+      robotNamespace + "/pf/orangeBall3DPosition", 10,
       boost::bind(&Robot::targetCallback, this, _1));
 
   // sLandmark_ = nh.subscribe<read_omni_dataset::LRMLandmarksData>(
@@ -105,34 +115,48 @@ Robot::Robot(ros::NodeHandle& nh, RobotFactory* parent, ParticleFilter* pf,
   ROS_INFO("Created robot OMNI%d", robotNumber + 1);
 }
 
-void Robot::odometryCallback(const nav_msgs::Odometry::ConstPtr& odometry)
+// void Robot::odometryCallback(const nav_msgs::Odometry::ConstPtr& odometry)
+void Robot::odometryCallback(const uav_msgs::uav_pose::ConstPtr& pose)
 {
-  if (!started_)
-    startNow();
+  ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::odometryCallback: Odometry callback");
 
-  if (!pf_->isInitialized())
+  if (selfPosInit.empty()) {
+    ROS_WARN("Robot::odometryCallback (machine %i): selfPosInit is empty, fill with %f, %f, %f", robotNumber_,pose->position.x, pose->position.y, tf2::getYaw(pose->orientation));
+    selfPosInit = {pose->position.x, pose->position.y, tf2::getYaw(pose->orientation)};
+  }
+  
+  if (!started_) {
+    ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::odometryCallback: started_ = false, calling startNow()");
+    startNow();
+  }
+  if (!pf_->isInitialized()) {
+    ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::odometryCallback: isInitialized_ = false, call tryInitializeParticles()");
     parent_->tryInitializeParticles();
+  }
 
   Odometry odomStruct;
-  odomStruct.x = odometry->pose.pose.position.x;
-  odomStruct.y = odometry->pose.pose.position.y;
-  odomStruct.theta = tf2::getYaw(odometry->pose.pose.orientation);
+  odomStruct.x = pose->position.x;
+  odomStruct.y = pose->position.y;
+  odomStruct.theta = tf2::getYaw(pose->orientation);
 
   //  ROS_DEBUG("OMNI%d odometry at time %d = {%f;%f;%f}", robotNumber_ + 1,
   //            odometry->header.stamp.sec, odomStruct.x, odomStruct.y,
   //            odomStruct.theta);
 
   // Call the particle filter predict step for this robot
-  pf_->predict(robotNumber_, odomStruct, odometry->header.stamp);
+  pf_->predict(robotNumber_, odomStruct, pose->header.stamp);
 }
 
-void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
+// void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
+void Robot::targetCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg)
 {
-  if (!started_)
+  ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::targetCallback: target callback");
+  if (!started_) {
+    ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::targetCallback: started_ = false, calling startNow()");
     startNow();
-
+  }
   // If needed, modify here to if(true) to go over the target occlusion from the dataset
-  if (target->found)
+  if (true)
   {
     // ROS_DEBUG("OMNI%d ball data at time %d", robotNumber_ + 1,
     //          target->header.stamp.sec);
@@ -140,12 +164,12 @@ void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
     TargetObservation obs;
 
     obs.found = true;
-    obs.x = target->x;
-    obs.y = target->y;
-    obs.z = target->z;
+    obs.x = msg->pose.pose.position.x;
+    obs.y = msg->pose.pose.position.y;
+    obs.z= msg->pose.pose.position.z;
     obs.d = Eigen::Vector2d(obs.x, obs.y).norm();
     obs.r = Eigen::Vector3d(obs.x, obs.y, obs.z).norm();
-    obs.phi = atan2(target->y, target->x);
+    obs.phi = atan2(obs.y, obs.x);
 
     // Auxiliary
     const double cos2p = pow(cos(obs.phi), 2);
@@ -173,7 +197,7 @@ void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
         sin2p * obs.covDD + cos2p * (d2 * obs.covPP + obs.covDD * obs.covPP);
 
     // Save this observation
-    pf_->saveTargetObservation(robotNumber_, obs, target->header.stamp);
+    pf_->saveTargetObservation(robotNumber_, obs, msg->header.stamp);
   }
   else
   {
@@ -188,7 +212,7 @@ void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
   // If this is the "self robot", update the iteration time
   if (MY_ID == (int)robotNumber_ + 1)
     pf_->updateTargetIterationTime(msg->header.stamp);
-    }
+}
 
 
 
@@ -234,7 +258,7 @@ int main(int argc, char* argv[])
 
   ROS_INFO_STREAM("DEBUG set to " << std::boolalpha << DEBUG << " and PUBLISH set to " << std::boolalpha << PUBLISH);
 
-  ros::init(argc, argv, "pfuclt_omni_dataset");
+  ros::init(argc, argv, "aircap_pfuclt");
   ros::NodeHandle nh("~");
 
   // read parameters from param server
@@ -242,21 +266,13 @@ int main(int argc, char* argv[])
   readParam<float>(nh, "ROB_HT", ROB_HT);
   readParam<int>(nh, "NUM_TARGETS", NUM_TARGETS);
 
-  
-  readParam<bool>(nh, "PLAYING_ROBOTS", PLAYING_ROBOTS);
-  readParam<double>(nh, "POS_INIT", POS_INIT);
+
+  PLAYING_ROBOTS.resize(MAX_ROBOTS);
+  PLAYING_ROBOTS.assign(MAX_ROBOTS,1);
   readParam<bool>(nh, "USE_CUSTOM_VALUES", USE_CUSTOM_VALUES);
   readParam<int>(nh, "MY_ID", MY_ID);
 
-  uint total_size = (uint)MAX_ROBOTS * STATES_PER_ROBOT + NUM_TARGETS * STATES_PER_TARGET;
 
-  readParam<double>(nh, "CUSTOM_PARTICLE_INIT", CUSTOM_PARTICLE_INIT);
-  if (CUSTOM_PARTICLE_INIT.size() != (total_size * 2))
-  {
-    ROS_ERROR("CUSTOM_PARTICLE_INIT given but not of correct size - should "
-              "have %d numbers and has %d",
-              total_size * 2, (int)CUSTOM_PARTICLE_INIT.size());
-  }
 
   ROS_INFO("Waiting for /clock");
   ros::Time::waitForValid();
@@ -264,11 +280,6 @@ int main(int argc, char* argv[])
 
   pfuclt_omni_dataset::RobotFactory Factory(nh);
 
-  if (USE_CUSTOM_VALUES && PLAYING_ROBOTS[1])
-  {
-    ROS_WARN("OMNI2 not present in dataset.");
-    return EXIT_FAILURE;
-  }
 
   // Factory.initializeFixedLandmarks();
 
