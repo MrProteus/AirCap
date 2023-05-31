@@ -20,48 +20,48 @@ PFPublisher::PFPublisher(struct ParticleFilter::PFinitData &data,
     std::string robotNamespace("/machine_" +
                         boost::lexical_cast<std::string>(data.mainRobotID));
 
-    // Other publishers
-    estimatePublisher_ =
+        // Other publishers
+        estimatePublisher_ =
             nh_.advertise<read_omni_dataset::Estimate>(robotNamespace + "/pf/pfuclt_estimate", 100);
-    particlePublisher_ =
+        particlePublisher_ =
             nh_.advertise<pfuclt_omni_dataset::particles>(robotNamespace + "/pf/pfuclt_particles", 10);
 
-    // Rviz visualization publishers
-    // Target
-    targetEstimatePublisher_ =
+        // Rviz visualization publishers
+        // Target
+        targetEstimatePublisher_ =
             nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/estimatedPose", 1000);
-    targetGTPublisher_ =
+        targetGTPublisher_ =
             nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/gtPose", 1000);
-    targetParticlePublisher_ =
+        targetParticlePublisher_ =
             nh_.advertise<sensor_msgs::PointCloud>(robotNamespace + "/pf/target/particles", 10);
 
-    // target observations publisher
-    targetObservationsPublisher_ =
+        // target observations publisher
+        targetObservationsPublisher_ =
             nh_.advertise<visualization_msgs::Marker>(robotNamespace + "/pf/targetObservations", 100);
 
     // Robots
     for (uint r = 0; r < nRobots_; ++r) {
         std::string robotName("/machine_" + boost::lexical_cast<std::string>(r + 1));
 
-    // particle publisher
-    particleStdPublishers_[r] = nh_.advertise<geometry_msgs::PoseArray>(
-            robotNamespace + "/pf/" + robotName + "/particles", 1000);
+        // particle publisher
+        particleStdPublishers_[r] = nh_.advertise<geometry_msgs::PoseArray>(
+                robotNamespace + "/pf/" + robotName + "/particles", 1000);
 
-    // estimated state
-    robotEstimatePublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
-            robotNamespace + "/pf/" + robotName + "/estimatedPose", 1000);
+        // estimated state
+        robotEstimatePublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
+                robotNamespace + "/pf/" + robotName + "/estimatedPose", 1000);
 
-    // build estimate msg
-    msg_estimate_.robotEstimates.push_back(geometry_msgs::Pose());
-    msg_estimate_.targetVisibility.push_back(false);
+        // build estimate msg
+        msg_estimate_.robotEstimates.push_back(geometry_msgs::Pose());
+        msg_estimate_.targetVisibility.push_back(false);
 
 // ground truth publisher, in the simulation package we have PoseStamped
 #ifndef USE_NEWER_READ_OMNI_PACKAGE
-    robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PointStamped>(
-            robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
+        robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PointStamped>(
+                robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
 #else
-    robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
-            robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
+        robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
+                robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
 #endif
     }
 
@@ -89,11 +89,11 @@ void PFPublisher::publishParticles() {
         msgStd_particles.header.frame_id = "world";
 
         for (uint p = 0; p < nParticles_; ++p) {
-            tf2::Quaternion tf2q(tf2::Vector3(0, 0, 1),
-                                 particles_[o_robot + O_THETA][p]);
+            tf2::Quaternion tf2q(particles_[o_robot + O_Q1][p],particles_[o_robot + O_Q2][p],particles_[o_robot + O_Q3][p],
+                                 particles_[o_robot + O_Q4][p]);
             tf2::Transform tf2t(tf2q, tf2::Vector3(particles_[o_robot + O_X][p],
                                                    particles_[o_robot + O_Y][p],
-                                                   pubData.robotHeight));
+                                                   particles_[o_robot + O_Z][p]));
 
             geometry_msgs::Pose pose;
             tf2::toMsg(tf2t, pose);
@@ -132,9 +132,9 @@ void PFPublisher::publishRobotStates() {
         geometry_msgs::Pose &rosState = msg_estimate_.robotEstimates[r];
 
         // Create from Euler angles
-        tf2::Quaternion tf2q(tf2::Vector3(0, 0, 1), pfState.pose[O_THETA]);
+        tf2::Quaternion tf2q(pfState.pose[O_Q1],pfState.pose[O_Q2],pfState.pose[O_Q3], pfState.pose[O_Q4]);
         tf2::Transform tf2t(tf2q, tf2::Vector3(pfState.pose[O_X], pfState.pose[O_Y],
-                                               pubData.robotHeight));
+                                               pfState.pose[O_Z]));
 
         // Transform to our message type
         tf2::toMsg(tf2t, rosState);
@@ -199,7 +199,7 @@ void PFPublisher::publishTargetObservations() {
 
         // Robot and observation
         std::ostringstream robotName;
-        robotName << "omni" << r + 1;
+        robotName << "machine_" << r + 1;
 
         TargetObservation &obs = bufTargetObservations_[r];
 
@@ -224,14 +224,15 @@ void PFPublisher::publishTargetObservations() {
 
         // Arrow draw
         geometry_msgs::Point tail;
-        tail.x = tail.y = tail.z = 0.0;
-        // Point at index 0 - tail tip - is 0,0,0 because we're in the local frame
+        tail.x = state_.robots[r].pose[O_X];
+        tail.y = state_.robots[r].pose[O_Y];
+        tail.z = state_.robots[r].pose[O_Z];
         marker.points.push_back(tail);
         // Point at index 1 - head - is the target pose in the local frame
         geometry_msgs::Point head;
         head.x = obs.x;
         head.y = obs.y;
-        head.z = obs.z - pubData.robotHeight;
+        head.z = obs.z;
         marker.points.push_back(head);
 
         marker.scale.x = 0.01;

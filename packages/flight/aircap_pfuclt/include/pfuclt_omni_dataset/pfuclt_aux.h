@@ -22,23 +22,7 @@ enum ORDER_TYPE
   DESC
 };
 
-/**
- * @brief The Landmark struct - used to store a landmark, defined by its serial
- * number, and its position {x,y}
- */
-typedef struct landmark_s
-{
-  int serial;
-  float x, y;
-} Landmark;
 
-/**
- * @brief getLandmarks - read landmark configuration from CSV file
- * @param filename - the CSV file
- * @return lm_vec
- * @remark if filename empty, not found or unreadable, will return empty vector
- */
-std::vector<Landmark> getLandmarks(const char* filename);
 
 /**
   * @brief calc_stdDev - Calculates standard deviation from a vector of type T

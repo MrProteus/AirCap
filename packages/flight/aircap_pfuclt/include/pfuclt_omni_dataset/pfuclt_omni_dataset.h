@@ -30,7 +30,7 @@
 namespace pfuclt_omni_dataset
 {
 
-#define STATES_PER_ROBOT 3
+#define STATES_PER_ROBOT 7
 #define HEURISTICS_THRESH_DEFAULT                                              \
   {                                                                            \
     2.5, 2.5, 2.5, 2.5, FLT_MAX, FLT_MAX, 3.5, 3.5, FLT_MAX, FLT_MAX           \
@@ -86,7 +86,7 @@ protected:
   ParticleFilter* pf_;
   bool started_;
   ros::Time timeStarted_;
-  ros::Subscriber sOdom_, sBall_;
+  ros::Subscriber cbOdometry, cbTarget, cbMeasurement;
   uint robotNumber_;
   Eigen::Isometry2d initPose_; // x y theta;
 
@@ -115,9 +115,15 @@ public:
 
   /**
    * @brief targetCallBack - event-driven function which should be called when
-   * new target data is received
+   * new target prediction is received
    */
   void targetCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr&);
+
+    /**
+   * @brief measurementCallBack - event-driven function which should be called when
+   * new target data is received
+   */
+  void measurementCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr&);
 
 
   /**
@@ -126,7 +132,7 @@ public:
    */
   bool hasStarted() { return started_; }; 
 
-  std::vector<double> selfPosInit;
+  uav_msgs::uav_pose lastReceivedOdometry_;
 };
 
 // end of namespace pfuclt_omni_dataset

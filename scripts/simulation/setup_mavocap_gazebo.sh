@@ -82,7 +82,7 @@ for i in $(seq 0 $(($ROBOS-1))); do
 
 	echo "Starting AIRCAP for robot $id"
         screen -d -m -S AIRCAP$id bash -i -c "roslaunch aircap simulation.launch robotID:=$id numRobots:=$ROBOS comSuccessRate:=$COMSUCCESSRATE --screen"
-		screen -d -m -S PFUCLT$id bash -i -c "roslaunch aircap_pfuclt aircap_pfuclt.launch robotID:=$id numRobots:=$ROBOS --screen"
+		# screen -d -m -S PFUCLT$id bash -i -c "roslaunch aircap_pfuclt aircap_pfuclt.launch robotID:=$id numRobots:=$ROBOS --screen"
 
   sleep 1
 

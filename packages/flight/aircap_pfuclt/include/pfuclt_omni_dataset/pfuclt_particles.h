@@ -18,6 +18,8 @@
 
 #include <dynamic_reconfigure/server.h>
 #include <pfuclt_omni_dataset/DynamicConfig.h>
+#include <uav_msgs/uav_pose.h>
+#include <target_tracker_distributed_kf/DistributedKF3D.h>
 
 #define NUM_ALPHAS 4
 
@@ -27,7 +29,12 @@
 // offsets
 #define O_X (0)
 #define O_Y (1)
-#define O_THETA (2)
+#define O_Z (2)
+#define O_Q1 (3)
+#define O_Q2 (4)
+#define O_Q3 (5)
+#define O_Q4 (6)
+
 //#define O_TARGET (nRobots_ * nStatesPerRobot_)
 #define O_TX (0)
 #define O_TY (1)
@@ -46,6 +53,8 @@
 #define MIN_WEIGHTSUM 1e-10
 
 //#define MORE_DEBUG true
+#define ESTIMATE_ROBOT_MOVEMENT false
+#define PREDICT_TARGET false
 
 namespace pfuclt_omni_dataset
 {
@@ -56,24 +65,14 @@ typedef double (*estimatorFunc)(const std::vector<double>&,
 
 typedef struct odometry_s
 {
-  double x, y, theta;
+  double x, y, z, q1, q2, q3, q4;
 } Odometry;
-
-typedef struct landmarkObs_s
-{
-  bool found;
-  double x, y;
-  double d, phi;
-  double covDD, covPP, covXX, covYY;
-  landmarkObs_s() { found = false; }
-} LandmarkObservation;
 
 typedef struct targetObs_s
 {
   bool found;
   double x, y, z;
-  double d, phi, r;
-  double covDD, covPP, covXX, covYY;
+  boost::array<double, 36UL> cov;
 
   targetObs_s() { found = false; }
 } TargetObservation;
@@ -260,37 +259,12 @@ protected:
   void spreadTargetParticlesSphere(float particlesRatio, pdata_t center[3],
                                    float radius);
 
-  /**
-   * @brief predictTarget - predict target state step
-   * @param robotNumber - the robot performing, for debugging purposes
-   */
-  void predictTarget();
-
-  /**
-   * @brief fuseRobots - fuse robot states step
-   */
-  void fuseRobots();
-
-  /**
-   * @brief fuseTarget - fuse target state step
-   */
-  void fuseTarget();
 
   /**
    * @brief modifiedMultinomialResampler - a costly resampler that keeps 50% of
    * the particles and implements the multinomial resampler on the rest
    */
   void modifiedMultinomialResampler(uint startAt);
-
-  /**
-   * @brief resample - the resampling step
-   */
-  void resample();
-
-  /**
-   * @brief estimate - state estimation through weighted means of particle weights
-   */
-  void estimate();
 
   /**
    * @brief nextIteration - perform final steps before next iteration
@@ -422,12 +396,28 @@ public:
    * @brief predict - prediction step in the particle filter set with the
    * received odometry
    * @param robotNumber - the robot number [0,N]
+   * @param pose - a structure containing the latest odometry readings
+   * @param lastReceivedOdometry - last received odometry message of this robot
+   * @warning only for the omni dataset configuration
+   */
+  void predict(const uint robotNumber, const uav_msgs::uav_poseConstPtr &pose,
+               const uav_msgs::uav_pose lastReceivedOdometry);
+
+  /**
+   * @brief predictTarget - predict target state step
+   * @param robotNumber - the robot performing, for debugging purposes
+   */
+  void predictTarget(const uint robotNumber, const geometry_msgs::PoseWithCovarianceStampedConstPtr &pose);
+
+    /**
+   * @brief predictKF - prediction step from AirCap
+   * @param robotNumber - the robot number [0,N]
    * @param odometry - a structure containing the latest odometry readings
    * @param time - a ros::Time structure with the timestamp for this data
    * @warning only for the omni dataset configuration
    */
-  void predict(const uint robotNumber, const Odometry odom,
-               const ros::Time stamp);
+  bool predictKF(const target_tracker_distributed_kf::CacheElement&, target_tracker_distributed_kf::CacheElement&);
+
 
   /**
    * @brief isInitialized - simple interface to access private member
@@ -455,24 +445,21 @@ public:
     bufTargetObservations_[robotNumber] = obs;
 
     // If previously target not seen and now is found
-    if (obs.found && !state_.target.seen)
-    {
+    // if (obs.found && !state_.target.seen)
+    // {
       // Update to target seen
       state_.target.seen = true;
 
       // Observation to global frame
-      const ParticleFilter::State::RobotState& rs = state_.robots[robotNumber];
       pdata_t ballGlobal[3];
-      ballGlobal[O_TX] = rs.pose[O_X] + obs.x * cos(rs.pose[O_THETA]) -
-                         obs.y * sin(rs.pose[O_THETA]);
-      ballGlobal[O_TY] = rs.pose[O_Y] + obs.x * sin(rs.pose[O_THETA]) +
-                         obs.y * cos(rs.pose[O_THETA]);
+      ballGlobal[O_TX] = obs.x;
+      ballGlobal[O_TY] = obs.y;
       ballGlobal[O_TZ] = obs.z;
 
       // Spread 50% of particles around ballGlobal in a sphere with 1.0 meter
       // radius
       spreadTargetParticlesSphere(0.5, ballGlobal, 1.0);
-    }
+    // }
   }
 
   /**
@@ -492,6 +479,26 @@ public:
    * @param robotNumber - the robot number performing the measurements
    */
   void saveAllTargetMeasurementsDone(const uint robotNumber);
+
+  /**
+   * @brief fuseRobots - fuse robot states step
+   */
+  void fuseRobots();
+
+  /**
+   * @brief fuseTarget - fuse target state step
+   */
+  void fuseTarget();
+  /**
+   * @brief resample - the resampling step
+   */
+  void resample();
+
+  /**
+   * @brief estimate - state estimation through weighted means of particle weights
+   */
+  void estimate();
+
 };
 
 // end of namespace pfuclt_omni_dataset

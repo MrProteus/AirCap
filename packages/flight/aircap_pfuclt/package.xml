@@ -23,6 +23,8 @@
   <build_depend>boost</build_depend>
   <build_depend>dynamic_reconfigure</build_depend>
   <build_depend>read_omni_dataset</build_depend>
+  <build_depend>target_tracker_distributed_kf</build_depend>
+  <build_depend>pose_cov_ops</build_depend>
   
   <run_depend>roscpp</run_depend>
   <run_depend>rospy</run_depend>
@@ -38,6 +40,8 @@
   <run_depend>boost</run_depend>
   <run_depend>dynamic_reconfigure</run_depend>
   <run_depend>read_omni_dataset</run_depend>
+  <run_depend>target_tracker_distributed_kf</run_depend>
+  <run_depend>pose_cov_ops</run_depend>
 
   <export>
   	<rosdoc config="rosdoc.yaml" />

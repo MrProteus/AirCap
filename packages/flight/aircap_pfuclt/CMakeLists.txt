@@ -44,6 +44,8 @@ find_package(catkin REQUIRED COMPONENTS
         tf2
         tf2_ros
         dynamic_reconfigure
+        target_tracker_distributed_kf
+        pose_cov_ops
         )
 
 FIND_PACKAGE(read_omni_dataset REQUIRED)
@@ -70,7 +72,7 @@ generate_messages(
 catkin_package(
         INCLUDE_DIRS include
         #  CATKIN_DEPENDS roscpp rospy
-        CATKIN_DEPENDS std_msgs roscpp read_omni_dataset
+        CATKIN_DEPENDS std_msgs roscpp read_omni_dataset target_tracker_distributed_kf pose_cov_ops
         #  DEPENDS system_lib
 )
 

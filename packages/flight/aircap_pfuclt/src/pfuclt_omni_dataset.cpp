@@ -23,7 +23,6 @@ bool DEBUG;
 bool PUBLISH;
 
 // for ease of access
-std::vector<Landmark> landmarks;
 ros::Time timeInit;
 
 // Method definitions
@@ -59,9 +58,17 @@ void RobotFactory::tryInitializeParticles()
   for (std::vector<Robot_ptr>::iterator it = robots_.begin();
        it != robots_.end(); ++it)
   {
-    POS_INIT.insert(POS_INIT.end(),(*it)->selfPosInit.begin(),(*it)->selfPosInit.end());
+    // write initial pose from lastReceivedOdometry to POS_INIT
+    const std::vector<double> selfPosInitVector = {(*it)->lastReceivedOdometry_.position.x, (*it)->lastReceivedOdometry_.position.y, (*it)->lastReceivedOdometry_.position.z, (*it)->lastReceivedOdometry_.orientation.x, (*it)->lastReceivedOdometry_.orientation.y, (*it)->lastReceivedOdometry_.orientation.z, (*it)->lastReceivedOdometry_.orientation.w};
+    POS_INIT.insert(POS_INIT.end(),selfPosInitVector.begin(),selfPosInitVector.end());
+    for (long unsigned int initPos = 0; initPos < selfPosInitVector.size(); initPos++) {
+      CUSTOM_PARTICLE_INIT.insert(CUSTOM_PARTICLE_INIT.end(),{selfPosInitVector[initPos] - 0.02, selfPosInitVector[initPos] + 0.02});
+    }
   }
+
   ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::tryInitializeParticles: Robots are not active! Initializing now");
+  
+  // for (auto i: CUSTOM_PARTICLE_INIT){std::cout<<i<<std::endl;}
   
   pf->init(CUSTOM_PARTICLE_INIT, POS_INIT);
 }
@@ -81,8 +88,8 @@ bool RobotFactory::areAllRobotsActive()
 
 void Robot::startNow()
 {
-  if (selfPosInit.empty()) {
-    ROS_WARN("Robot::startNow (Robot %i): selfPosInit is empty, don't start yet",robotNumber_);
+  if (lastReceivedOdometry_.header.seq == 0) {
+    ROS_DEBUG("Robot::startNow (Robot %i): lastReceivedOdometry is empty, don't start yet",robotNumber_);
     return;
   }
   timeStarted_ = ros::Time::now();
@@ -99,13 +106,17 @@ Robot::Robot(ros::NodeHandle& nh, RobotFactory* parent, ParticleFilter* pf,
                              boost::lexical_cast<std::string>(robotNumber + 1));
 
   // Subscribe to topics
-  sOdom_ = nh.subscribe<uav_msgs::uav_pose>(
-      robotNamespace + "/pf/odometry", 10,
+  cbOdometry = nh.subscribe<uav_msgs::uav_pose>(
+      robotNamespace + "/pose", 10,
       boost::bind(&Robot::odometryCallback, this, _1));
 
-  sBall_ = nh.subscribe<geometry_msgs::PoseWithCovarianceStamped>(
-      robotNamespace + "/pf/orangeBall3DPosition", 10,
+  cbTarget = nh.subscribe<geometry_msgs::PoseWithCovarianceStamped>(
+      robotNamespace + "/target_tracker/pose", 10,
       boost::bind(&Robot::targetCallback, this, _1));
+
+  cbMeasurement = nh.subscribe<geometry_msgs::PoseWithCovarianceStamped>(
+      robotNamespace + "/object_detections/projected_to_world", 10,
+      boost::bind(&Robot::measurementCallback, this, _1));
 
   // sLandmark_ = nh.subscribe<read_omni_dataset::LRMLandmarksData>(
   //     robotNamespace + "/landmarkspositions", 10,
@@ -119,9 +130,10 @@ void Robot::odometryCallback(const uav_msgs::uav_pose::ConstPtr& pose)
 {
   ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::odometryCallback: Odometry callback");
 
-  if (selfPosInit.empty()) {
-    ROS_WARN("Robot::odometryCallback (machine %i): selfPosInit is empty, fill with %f, %f, %f", robotNumber_,pose->position.x, pose->position.y, tf2::getYaw(pose->orientation));
-    selfPosInit = {pose->position.x, pose->position.y, tf2::getYaw(pose->orientation)};
+  if (lastReceivedOdometry_.header.seq == 0) {
+    ROS_DEBUG("Robot::odometryCallback (machine %i): lastReceivedOdometry is empty, fill with %f, %f, %f, %f, %f, %f, %f", 
+        robotNumber_,pose->position.x, pose->position.y, pose->position.z, pose->orientation.x, pose->orientation.y, pose->orientation.z, pose->orientation.w);
+    lastReceivedOdometry_ = *pose;
   }
   
   if (!started_) {
@@ -133,25 +145,25 @@ void Robot::odometryCallback(const uav_msgs::uav_pose::ConstPtr& pose)
     parent_->tryInitializeParticles();
   }
 
-  Odometry odomStruct;
-  odomStruct.x = pose->position.x;
-  odomStruct.y = pose->position.y;
-  odomStruct.theta = tf2::getYaw(pose->orientation);
 
   //  ROS_DEBUG("OMNI%d odometry at time %d = {%f;%f;%f}", robotNumber_ + 1,
   //            odometry->header.stamp.sec, odomStruct.x, odomStruct.y,
   //            odomStruct.theta);
 
   // Call the particle filter predict step for this robot
-  pf_->predict(robotNumber_, odomStruct, pose->header.stamp);
+  pf_->predict(robotNumber_, pose, lastReceivedOdometry_);
 }
 
-// void Robot::targetCallback(const read_omni_dataset::BallData::ConstPtr& target)
-void Robot::targetCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg)
+void Robot::targetCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg) {
+  pf_->predictTarget(robotNumber_,msg);
+}
+
+// void Robot::measurementCallback(const read_omni_dataset::BallData::ConstPtr& target)
+void Robot::measurementCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg)
 {
-  ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::targetCallback: target callback");
+  ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::measurementCallback: target callback");
   if (!started_) {
-    ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::targetCallback: started_ = false, calling startNow()");
+    ROS_DEBUG("pfuclt_omni_dataset/RobotFactory::measurementCallback: started_ = false, calling startNow()");
     startNow();
   }
   // If needed, modify here to if(true) to go over the target occlusion from the dataset
@@ -166,34 +178,7 @@ void Robot::targetCallback(const geometry_msgs::PoseWithCovarianceStamped::Const
     obs.x = msg->pose.pose.position.x;
     obs.y = msg->pose.pose.position.y;
     obs.z= msg->pose.pose.position.z;
-    obs.d = Eigen::Vector2d(obs.x, obs.y).norm();
-    obs.r = Eigen::Vector3d(obs.x, obs.y, obs.z).norm();
-    obs.phi = atan2(obs.y, obs.x);
-
-    // Auxiliary
-    const double cos2p = pow(cos(obs.phi), 2);
-    const double sin2p = pow(sin(obs.phi), 2);
-    const double d2 = pow(obs.d, 2);
-    const double r2 = pow(obs.r, 2);
-
-    // 3D Model
-    static const float ballRadius = 0.1;
-    static const float ballr2 = pow(ballRadius, 2);
-    obs.covDD = K3 * (r2 * sin2p / (2 * ballr2)) +
-                K4 * (r2 * sin2p / (2 * (r2 - ballr2))) +
-                K3 * K4 * (r2 * cos2p / (4 * ballr2 * (r2 - ballr2)));
-    obs.covPP = K5 / (r2 - ballr2 * sin2p);
-
-    // 2D Model
-    //    obs.covDD = (double)(1 / target->mismatchFactor) *
-    //                (K3 * obs.d + K4 * (obs.d * obs.d));
-
-    //    obs.covPP = K5 * (1 / (obs.d + 1));
-
-    obs.covXX =
-        cos2p * obs.covDD + sin2p * (d2 * obs.covPP + obs.covDD * obs.covPP);
-    obs.covYY =
-        sin2p * obs.covDD + cos2p * (d2 * obs.covPP + obs.covDD * obs.covPP);
+    obs.cov = msg->pose.covariance;
 
     // Save this observation
     pf_->saveTargetObservation(robotNumber_, obs, msg->header.stamp);
@@ -211,6 +196,12 @@ void Robot::targetCallback(const geometry_msgs::PoseWithCovarianceStamped::Const
   // If this is the "self robot", update the iteration time
   if (MY_ID == (int)robotNumber_ + 1)
     pf_->updateTargetIterationTime(msg->header.stamp);
+
+
+  pf_->fuseRobots();
+  pf_->fuseTarget();
+  pf_->resample();
+  pf_->estimate();
 }
 
 
@@ -262,7 +253,6 @@ int main(int argc, char* argv[])
 
   // read parameters from param server
   readParam<int>(nh, "MAX_ROBOTS", MAX_ROBOTS);
-  readParam<float>(nh, "ROB_HT", ROB_HT);
   readParam<int>(nh, "NUM_TARGETS", NUM_TARGETS);
 
 

@@ -1,6 +1,11 @@
 #include <pfuclt_omni_dataset/pfuclt_particles.h>
 #include <boost/foreach.hpp>
 #include <angles/angles.h>
+#include <pfuclt_omni_dataset/averaging_quaternions.h>
+#include <uav_msgs/uav_pose.h>
+#include <target_tracker_distributed_kf/DistributedKF3D.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 //#define RECONFIGURE_ALPHAS true
 
@@ -23,6 +28,7 @@ ParticleFilter::ParticleFilter(struct PFinitData& data)
       O_TARGET(data.nRobots * data.statesPerRobot),
       O_WEIGHT(nSubParticleSets_ - 1)
 {
+  ROS_WARN("nParticles_: %i STATES_PER_TARGET: %i statesPerRobot: %i nSubParticleSets_: %i", nParticles_, STATES_PER_TARGET, data.statesPerRobot, nSubParticleSets_);
   ROS_INFO("Created particle filter with dimensions %d, %d",
            (int)particles_.size(), (int)particles_[0].size());
 
@@ -99,32 +105,170 @@ void ParticleFilter::spreadTargetParticlesSphere(float particlesRatio,
   }
 }
 
-void ParticleFilter::predictTarget()
+void ParticleFilter::predictTarget(const uint robotNumber, const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose)
 {
   *iteration_oss << "predictTarget() -> ";
 
   using namespace boost::random;
 
-  // Random acceleration model
-  normal_distribution<> targetAcceleration(TARGET_RAND_MEAN,
-                                           dynamicVariables_.targetRandStddev);
+  int robot_offset = robotNumber * nStatesPerRobot_;
 
   for (uint p = 0; p < nParticles_; p++)
   {
-    // Get random accelerations
-    pdata_t accel[STATES_PER_TARGET] = { (pdata_t)targetAcceleration(seed_),
-                                         (pdata_t)targetAcceleration(seed_),
-                                         (pdata_t)targetAcceleration(seed_) };
+    if (PREDICT_TARGET) {
+      bool isSelf = (robotNumber == mainRobotID_);
 
-    // Use random acceleration model
-    for (uint s = 0; s < STATES_PER_TARGET; ++s)
-    {
-      particles_[O_TARGET + s][p] += 0.5 * accel[s] * pow(targetIterationTime_.diff, 2);
+      geometry_msgs::PoseWithCovarianceStamped stateFromParticle; 
+      stateFromParticle.pose.pose.position.x = particles_[robot_offset + O_TX][p];
+      stateFromParticle.pose.pose.position.y = particles_[robot_offset + O_TY][p];
+      stateFromParticle.pose.pose.position.z = particles_[robot_offset + O_TZ][p];
+
+      target_tracker_distributed_kf::CacheElement previousState((int) nStatesPerRobot_,stateFromParticle, isSelf, robotNumber);
+      target_tracker_distributed_kf::CacheElement prediction(pose->header, nStatesPerRobot_, isSelf, robotNumber);
+
+      // predict with function from Kalman Filter
+      if (!predictKF(previousState, prediction))
+        return;
+      
+      // insert predicted state into particle
+      particles_[robot_offset + O_TX][p] = prediction.state(0);
+      particles_[robot_offset + O_TY][p] = prediction.state(1);
+      particles_[robot_offset + O_TZ][p] = prediction.state(2);
+    }
+    else {
+      particles_[robot_offset + O_TX][p] = pose->pose.pose.position.x;
+      particles_[robot_offset + O_TY][p] = pose->pose.pose.position.y;
+      particles_[robot_offset + O_TZ][p] = pose->pose.pose.position.z;
     }
   }
 }
 
+void ParticleFilter::fuseRobots()
+{
+  *iteration_oss << "fuseRobots() -> ";
 
+  // Save the latest observation time to be used when publishing
+  savedLatestObservationTime_ = latestObservationTime_;
+
+  // Keeps track of number of landmarks seen for each robot
+  std::vector<uint> landmarksSeen(nRobots_, 0);
+
+  // Will track the probability propagation based on the landmark observations
+  // for each robot
+  std::vector<subparticles_t> probabilities(nRobots_,
+                                            subparticles_t(nParticles_, 1.0));
+
+  // For every robot
+  for (uint r = 0; r < nRobots_; ++r)
+  {
+
+    // Index offset for this robot in the particles vector
+    uint o_robot = r * nStatesPerRobot_;
+
+    // // For every landmark
+    // for (uint l = 0; l < nLandmarks_; ++l)
+    // {
+    //   // If landmark not seen, skip
+    //   if (false == bufLandmarkObservations_[r][l].found)
+    //     continue;
+    //   else
+    //     ++(landmarksSeen[r]);
+
+    //   // Reference to the observation for easier access
+    //   LandmarkObservation& m = bufLandmarkObservations_[r][l];
+
+    //   // Observation in robot frame
+    //   Eigen::Matrix<pdata_t, 2, 1> Zrobot(m.x, m.y);
+
+    //   // Landmark in global frame
+    //   Eigen::Matrix<pdata_t, 2, 1> LMglobal(landmarksMap_[l].x,
+    //                                         landmarksMap_[l].y);
+
+#pragma omp parallel for
+      for (uint p = 0; p < nParticles_; ++p)
+      {
+
+        // // Robot pose <=> frame
+        // Eigen::Rotation2D<pdata_t> Rrobot(-particles_[o_robot + O_THETA][p]);
+        // Eigen::Matrix<pdata_t, 2, 1> Srobot(particles_[o_robot + O_X][p],
+        //                                     particles_[o_robot + O_Y][p]);
+
+        // // Landmark to robot frame
+        // Eigen::Matrix<pdata_t, 2, 1> LMrobot = Rrobot * (LMglobal - Srobot);
+
+        // // Error in observation
+        // Eigen::Matrix<pdata_t, 2, 1> Zerr = LMrobot - Zrobot;
+
+        // // The values of interest to the particle weights
+        // // Note: using Eigen wasn't of particular interest here since it does
+        // // not allow for transposing a non-dynamic matrix
+        // float expArg = -0.5 * (Zerr(O_X) * Zerr(O_X) / m.covXX +
+        //                        Zerr(O_Y) * Zerr(O_Y) / m.covYY);
+        float expArg = 0;
+        float detValue = 1.0; // pow((2 * M_PI * m.covXX * m.covYY), -0.5);
+
+        /*
+        ROS_DEBUG_COND(
+            p == 0,
+            "OMNI%d's particle 0 is at {%f;%f;%f}, sees landmark %d with "
+            "certainty %f%%, and error {%f;%f}",
+            r + 1, particles_[o_robot + O_X][p], particles_[o_robot + O_Y][p],
+            particles_[o_robot + O_THETA][p], l, 100 * (detValue * exp(expArg)),
+            Zerr(0), Zerr(1));
+        */
+
+        // Update weight component for this robot and particular particle
+        probabilities[r][p] *= detValue * exp(expArg);
+      }
+    // }
+  }
+
+  // Reset weights, later will be multiplied by weightComponents of each robot
+  resetWeights(1.0);
+
+  // Duplicate particles
+  particles_t dupParticles(particles_);
+
+  for (uint r = 0; r < nRobots_; ++r)
+  {
+    // Check that at least one landmark was seen, if not send warning
+    // If seen use probabilities vector, if not keep using the previous
+    // weightComponents for this robot
+    // if (0 == landmarksSeen[r])
+    // {
+    //   ROS_WARN("In this iteration, OMNI%d didn't see any landmarks", r + 1);
+
+    //   // weightComponent stays from previous iteration
+    // }
+
+    // else
+    // {
+      weightComponents_[r] = probabilities[r];
+    // }
+
+    // Index offset for this robot in the particles vector
+    uint o_robot = r * nStatesPerRobot_;
+
+    // Create a vector of indexes according to a descending order of the weights
+    // components of robot r
+    std::vector<uint> sorted = order_index<pdata_t>(weightComponents_[r], DESC);
+
+    // For every particle
+    for (uint p = 0; p < nParticles_; ++p)
+    {
+      // Re-order the particle subsets of this robot
+      uint sort_index = sorted[p];
+
+      // Copy this sub-particle set from dupParticles' sort_index particle
+      copyParticle(particles_, dupParticles, p, sort_index, o_robot,
+                   o_robot + nStatesPerRobot_ - 1);
+
+      // Update the particle weight (will get multiplied nRobots times and get a
+      // lower value)
+      particles_[O_WEIGHT][p] *= weightComponents_[r][sort_index];
+    }
+  }
+}
 
 void ParticleFilter::fuseTarget()
 {
@@ -191,24 +335,16 @@ void ParticleFilter::fuseTarget()
         Z[0] = obs->x;
         Z[1] = obs->y;
         Z[2] = obs->z;
-        Zcap[0] =
-            (particles_[O_TARGET + O_TX][p] - particles_[o_robot + O_X][m]) *
-                (cos(particles_[o_robot + O_THETA][m])) +
-            (particles_[O_TARGET + O_TY][p] - particles_[o_robot + O_Y][m]) *
-                (sin(particles_[o_robot + O_THETA][m]));
-        Zcap[1] =
-            -(particles_[O_TARGET + O_TX][p] - particles_[o_robot + O_X][m]) *
-                (sin(particles_[o_robot + O_THETA][m])) +
-            (particles_[O_TARGET + O_TY][p] - particles_[o_robot + O_Y][m]) *
-                (cos(particles_[o_robot + O_THETA][m]));
+        Zcap[0] = particles_[O_TARGET + O_TX][p];
+        Zcap[1] = particles_[O_TARGET + O_TY][p];
         Zcap[2] = particles_[O_TARGET + O_TZ][p];
         Z_Zcap[0] = Z[0] - Zcap[0];
         Z_Zcap[1] = Z[1] - Zcap[1];
         Z_Zcap[2] = Z[2] - Zcap[2];
 
-        expArg = -0.5 * (Z_Zcap[0] * Z_Zcap[0] / obs->covXX +
-                         Z_Zcap[1] * Z_Zcap[1] / obs->covYY +
-                         Z_Zcap[2] * Z_Zcap[2] / .04);
+        expArg = -0.5 * (Z_Zcap[0] * Z_Zcap[0] / obs->cov[0 * 6 + 0] +
+                         Z_Zcap[1] * Z_Zcap[1] / obs->cov[1 * 6 + 1] +
+                         Z_Zcap[2] * Z_Zcap[2] / obs->cov[2 * 6 + 2]);
         detValue =
             1.0; // pow((2 * M_PI * obs->covXX * obs->covYY * 10.0), -0.5);
 
@@ -311,9 +447,13 @@ void ParticleFilter::resample()
 
     pdata_t stdX = calc_stdDev<pdata_t>(particles_[o_robot + O_X]);
     pdata_t stdY = calc_stdDev<pdata_t>(particles_[o_robot + O_Y]);
-    pdata_t stdTheta = calc_stdDev<pdata_t>(particles_[o_robot + O_THETA]);
+    pdata_t stdZ = calc_stdDev<pdata_t>(particles_[o_robot + O_Z]);
+    pdata_t stdQ1 = calc_stdDev<pdata_t>(particles_[o_robot + O_Q1]);
+    pdata_t stdQ2 = calc_stdDev<pdata_t>(particles_[o_robot + O_Q2]);
+    pdata_t stdQ3 = calc_stdDev<pdata_t>(particles_[o_robot + O_Q3]);
+    pdata_t stdQ4 = calc_stdDev<pdata_t>(particles_[o_robot + O_Q4]);
 
-    state_.robots[r].conf = 1 / (stdX + stdY + stdTheta);
+    state_.robots[r].conf = 1 / (stdX + stdY + stdZ + stdQ1 + stdQ2 + stdQ3 + stdQ4);
 
     // ROS_DEBUG("OMNI%d stdX = %f, stdY = %f, stdTheta = %f", r + 1, stdX,
     // stdY,
@@ -394,38 +534,46 @@ void ParticleFilter::estimate()
    uint o_robot = r * nStatesPerRobot_;
 
     // A vector of weighted means that will be calculated in the next loop
-    std::vector<double> weightedMeans(nStatesPerRobot_ - 1, 0.0);
+    std::vector<double> weightedMeans(3, 0.0);
 
     // For theta we will obtain the mean of circular quantities, by converting
     // to cartesian coordinates, placing each angle in the unit circle,
     // averaging these points and finally converting again to polar
     double weightedMeanThetaCartesian[2] = { 0, 0 };
 
+    std::vector<tf::Quaternion> allOrientations;
+    std::vector<double> allWeights;
+
     // ..and each particle
     for (uint p = 0; p < nParticles_; ++p)
     {
       // Accumulate the state proportionally to the particle's normalized weight
-      for (uint g = 0; g < nStatesPerRobot_ - 1; ++g)
-      {
-        weightedMeans[g] += particles_[o_robot + g][p] * normalizedWeights[p];
-      }
+      weightedMeans[O_X] += particles_[o_robot + O_X][p] * normalizedWeights[p];
+      weightedMeans[O_Y] += particles_[o_robot + O_Y][p] * normalizedWeights[p];
+      weightedMeans[O_Z] += particles_[o_robot + O_Z][p] * normalizedWeights[p];
 
-      // Mean of circular quantities for theta
-      weightedMeanThetaCartesian[O_X] +=
-          cos(particles_[o_robot + O_THETA][p]) * normalizedWeights[p];
-      weightedMeanThetaCartesian[O_Y] +=
-          sin(particles_[o_robot + O_THETA][p]) * normalizedWeights[p];
+      tf::Quaternion thisOrientation(
+          particles_[o_robot + O_Q1][p],
+          particles_[o_robot + O_Q2][p],
+          particles_[o_robot + O_Q3][p],
+          particles_[o_robot + O_Q4][p]);
+
+      allOrientations.push_back(thisOrientation);
+      allWeights.push_back(normalizedWeights[p]);
+
     }
 
-    // Put the angle back in polar coordinates
-    double weightedMeanThetaPolar =
-        atan2(weightedMeanThetaCartesian[O_Y], weightedMeanThetaCartesian[O_X]);
+    tf::Quaternion weightedMeanOrientation = getAverageQuaternion(allOrientations, allWeights);
 
     // Save in the robot state
     // Can't use easy copy since one is using double precision
     state_.robots[r].pose[O_X] = weightedMeans[O_X];
     state_.robots[r].pose[O_Y] = weightedMeans[O_Y];
-    state_.robots[r].pose[O_THETA] = weightedMeanThetaPolar;
+    state_.robots[r].pose[O_Z] = weightedMeans[O_Z];
+    state_.robots[r].pose[O_Q1] = weightedMeanOrientation[0];
+    state_.robots[r].pose[O_Q2] = weightedMeanOrientation[1];
+    state_.robots[r].pose[O_Q3] = weightedMeanOrientation[2];
+    state_.robots[r].pose[O_Q4] = weightedMeanOrientation[3];
   }
 
   // Target weighted means
@@ -494,10 +642,12 @@ void ParticleFilter::init(const std::vector<double>& customRandInit,
   // Set flag
   initialized_ = true;
 
-  bool flag_theta_given = (customPosInit.size() == nRobots_ * 3 &&
-                           customRandInit.size() == nSubParticleSets_ * 3);
-  size_t numVars =
-      flag_theta_given ? customRandInit.size() / 3 : customRandInit.size() / 2;
+  // bool flag_theta_given = (customPosInit.size() == nRobots_ * 7 &&
+  //                          customRandInit.size() == nSubParticleSets_ * 7);
+  // size_t numVars =
+  //     flag_theta_given ? customRandInit.size() / 7 : customRandInit.size() / 2;
+
+  size_t numVars = customRandInit.size() / 2;
 
   ROS_INFO("Initializing particle filter");
 
@@ -521,11 +671,14 @@ void ParticleFilter::init(const std::vector<double>& customRandInit,
   // Initialize pose with initial belief
   for (uint r = 0; r < nRobots_; ++r)
   {
-    pdata_t tmp[] = { (pdata_t)customPosInit[2 * r + O_X], (pdata_t)customPosInit[2 * r + O_Y],
-                      (pdata_t)-M_PI };
+    pdata_t tmp[] = { (pdata_t)customPosInit[7 * r + O_X], (pdata_t)customPosInit[7 * r + O_Y],
+                      (pdata_t)customPosInit[7 * r + O_Z] };
     state_.robots[r].pose = std::vector<pdata_t>(tmp, tmp + nStatesPerRobot_);
-    if (flag_theta_given)
-      state_.robots[r].pose.push_back(customPosInit[2 * r + O_THETA]);
+    // if (flag_theta_given)
+      state_.robots[r].pose.push_back(customPosInit[7 * r + O_Q1]);
+      state_.robots[r].pose.push_back(customPosInit[7 * r + O_Q2]);
+      state_.robots[r].pose.push_back(customPosInit[7 * r + O_Q3]);
+      state_.robots[r].pose.push_back(customPosInit[7 * r + O_Q4]);
   }
 
   // State should have the initial belief
@@ -533,13 +686,13 @@ void ParticleFilter::init(const std::vector<double>& customRandInit,
   ROS_INFO("Particle filter initialized");
 }
 
-void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
-                             const ros::Time stamp)
+void ParticleFilter::predict(const uint robotNumber, const uav_msgs::uav_poseConstPtr &pose,
+                             const uav_msgs::uav_pose lastReceivedOdometry)
 {
   if (!initialized_)
     return;
 
-  *iteration_oss << "predict(OMNI" << robotNumber + 1 << ") -> ";
+  *iteration_oss << "predict(machine_" << robotNumber + 1 << ") -> ";
 
   // If this is the main robot, update the odometry time
   if (mainRobotID_ == robotNumber)
@@ -551,55 +704,51 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
 
   // Variables concerning this robot specifically
   int robot_offset = robotNumber * nStatesPerRobot_;
-  std::vector<float>& alpha = dynamicVariables_.alpha[robotNumber];
 
-  // Determining the propagation of the robot state through odometry
-  pdata_t deltaRot = atan2(odom.y, odom.x);
-  pdata_t deltaTrans = sqrt(odom.x * odom.x + odom.y * odom.y);
-  pdata_t deltaFinalRot = odom.theta - deltaRot;
+  if (ESTIMATE_ROBOT_MOVEMENT) {
+    // get difference between this and previous odometry message 
+    // to apply to robot state in particles
+    geometry_msgs::Pose deltaOdometry;
+    deltaOdometry.position.x = pose->position.x - lastReceivedOdometry.position.x;
+    deltaOdometry.position.y = pose->position.y - lastReceivedOdometry.position.y;
+    deltaOdometry.position.z = pose->position.z - lastReceivedOdometry.position.z;
+    // newOrientation = delta * oldOrientation
+    // delta = newOrientation * oldOrientation^-1
+    tf2::Quaternion oldOrientation(lastReceivedOdometry.orientation.x,lastReceivedOdometry.orientation.y,lastReceivedOdometry.orientation.z,(-1)*lastReceivedOdometry.orientation.w);
+    tf2::Quaternion newOrientation(pose->orientation.x,pose->orientation.y,pose->orientation.z,pose->orientation.w);
+    newOrientation *= oldOrientation;
+    newOrientation.normalize();
+    deltaOdometry.orientation.x = newOrientation.getX();
+    deltaOdometry.orientation.y = newOrientation.getY();
+    deltaOdometry.orientation.z = newOrientation.getZ();
+    deltaOdometry.orientation.w = newOrientation.getW();
 
-  // Create an error model based on a gaussian distribution
-  normal_distribution<> deltaRotEffective(deltaRot, alpha[0] * fabs(deltaRot) +
-                                                        alpha[1] * deltaTrans);
-
-  normal_distribution<> deltaTransEffective(
-      deltaTrans,
-      alpha[2] * deltaTrans + alpha[3] * fabs(deltaRot + deltaFinalRot));
-
-  normal_distribution<> deltaFinalRotEffective(
-      deltaFinalRot, alpha[0] * fabs(deltaFinalRot) + alpha[1] * deltaTrans);
-
-  for (uint i = 0; i < nParticles_; i++)
-  {
-    // Rotate to final position
-    particles_[O_THETA + robot_offset][i] += deltaRotEffective(seed_);
-
-    pdata_t sampleTrans = deltaTransEffective(seed_);
-
-    // Translate to final position
-    particles_[O_X + robot_offset][i] +=
-        sampleTrans * cos(particles_[O_THETA + robot_offset][i]);
-    particles_[O_Y + robot_offset][i] +=
-        sampleTrans * sin(particles_[O_THETA + robot_offset][i]);
-
-    // Rotate to final position and normalize angle
-    particles_[O_THETA + robot_offset][i] = angles::normalize_angle(
-        particles_[O_THETA + robot_offset][i] + deltaFinalRotEffective(seed_));
+    for (uint i = 0; i < nParticles_; i++) {
+      particles_[robot_offset + O_X][i] += deltaOdometry.position.x;
+      particles_[robot_offset + O_Y][i] += deltaOdometry.position.y;
+      particles_[robot_offset + O_Z][i] += deltaOdometry.position.z;
+      tf2::Quaternion particleOrientation(particles_[robot_offset + O_Q1][i],particles_[robot_offset + O_Q2][i],particles_[robot_offset + O_Q3][i],particles_[robot_offset + O_Q4][i]);
+      newOrientation *= particleOrientation;
+      newOrientation.normalize();
+      particles_[robot_offset + O_Q1][i] = newOrientation.getX();
+      particles_[robot_offset + O_Q2][i] = newOrientation.getY();
+      particles_[robot_offset + O_Q3][i] = newOrientation.getZ();
+      particles_[robot_offset + O_Q4][i] = newOrientation.getW();
+    }
   }
 
-  // Check if we should activate robotRandom
-  // Only if no landmarks and no target seen
-  uint nLandmarksSeen = 0;
-  // for (std::vector<LandmarkObservation>::iterator it =
-  //          bufLandmarkObservations_[robotNumber].begin();
-  //      it != bufLandmarkObservations_[robotNumber].end(); ++it)
-  // {
-  //   if (it->found)
-  //     nLandmarksSeen++;
-  // }
+  else {
+    for (uint i = 0; i < nParticles_; i++) {
+      particles_[robot_offset + O_X][i] = pose->position.x;
+      particles_[robot_offset + O_Y][i] = pose->position.y;
+      particles_[robot_offset + O_Z][i] = pose->position.z;
+      particles_[robot_offset + O_Q1][i] = pose->orientation.x;
+      particles_[robot_offset + O_Q2][i] = pose->orientation.y;
+      particles_[robot_offset + O_Q3][i] = pose->orientation.z;
+      particles_[robot_offset + O_Q4][i] = pose->orientation.w;
+    }
+  }
 
-  if (nLandmarksSeen == 0 && !bufTargetObservations_[robotNumber].found)
-  {
     // Randomize a bit for this robot since it does not see landmarks and target
     // isn't seen
     boost::random::uniform_real_distribution<> randPar(-0.05, 0.05);
@@ -609,7 +758,6 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
       for (uint s = 0; s < nStatesPerRobot_; ++s)
         particles_[robot_offset + s][p] += randPar(seed_);
     }
-  }
 
   // If this is the main robot, perform one PF-UCLT iteration
   if (mainRobotID_ == robotNumber)
@@ -618,12 +766,6 @@ void ParticleFilter::predict(const uint robotNumber, const Odometry odom,
     // Lock mutex
     boost::mutex::scoped_lock(mutex_);
 
-    // All the PF-UCLT steps
-    predictTarget();
-    // fuseRobots();
-    fuseTarget();
-    resample();
-    estimate();
     ROS_DEBUG("Full iteration complete");
 
     ROS_INFO("(WALL TIME) Odometry analyzed with = %fms",
@@ -714,5 +856,83 @@ void ParticleFilter::dynamicVariables_s::fill_alpha(const uint robot,
                 NUM_ALPHAS);
 }
 
+
+bool ParticleFilter::predictKF(const target_tracker_distributed_kf::CacheElement &in, target_tracker_distributed_kf::CacheElement &out) {
+
+        // Easy access
+        const Eigen::VectorXd &ins = in.state;
+        Eigen::VectorXd &outs = out.state;
+
+        // Time passed from one to next
+        if (!out.stamp.isValid() || !in.stamp.isValid()) {
+            ROS_WARN("One of the stamps is invalid, returning false from predict() without doing anything else");
+            return false;
+        }
+
+        const double deltaT = out.stamp.toSec() - in.stamp.toSec();
+
+        const static double velocityDecayTime = 3.0;
+
+        const static double velocityDecayTo = 0.1;
+        const double velocityDecayAlpha = pow(velocityDecayTo, 1.0 / velocityDecayTime);
+        const double velocityDecayFactor = pow(velocityDecayAlpha, deltaT);
+        const double velocityIntegralFactor = (velocityDecayFactor - 1) / log(velocityDecayAlpha);
+
+        // Decreasing velocity model
+        outs(0) = ins(0) + ins(3) * velocityIntegralFactor;
+        outs(1) = ins(1) + ins(4) * velocityIntegralFactor;
+        outs(2) = ins(2) + ins(5) * velocityIntegralFactor;
+
+        outs(3) = ins(3) * velocityDecayFactor;
+        outs(4) = ins(4) * velocityDecayFactor;
+        outs(5) = ins(5) * velocityDecayFactor;
+
+        // const static double offsetDecayTo = 0.1;
+        // const double offsetDecayAlpha = pow(offsetDecayTo, 1.0 / offsetDecayTime);
+        // const double offsetDecayFactor = pow(offsetDecayAlpha, deltaT);
+        // //const double offsetIntegralFactor = (offsetDecayFactor - 1)/log(offsetDecayAlpha);
+
+        // outs(6) = (ins(6) - posGlobalOffsetBiasX) * offsetDecayFactor;
+        // outs(7) = (ins(7) - posGlobalOffsetBiasY) * offsetDecayFactor;
+        // outs(8) = (ins(8) - posGlobalOffsetBiasZ) * offsetDecayFactor;
+
+        // Construct jacobian G based on deltaT
+        Eigen::MatrixXd G((int) nStatesPerRobot_, (int) nStatesPerRobot_);
+        // offset assumed independent from target detection
+        G << 1.0, 0.0, 0.0, deltaT, 0.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 1.0, 0.0, 0.0, deltaT, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 1.0, 0.0, 0.0, deltaT, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+
+        double  noisePosXVar{0.01},
+        noiseVelXVar{0.01},
+        noiseOffXVar{0.01},
+        noisePosYVar{0.01},
+        noiseVelYVar{0.01},
+        noiseOffYVar{0.01},
+        noisePosZVar{0.01},
+        noiseVelZVar{0.01},
+        noiseOffZVar{0.01};
+        
+        Eigen::MatrixXd R((int) nStatesPerRobot_, (int) nStatesPerRobot_);
+        R << noisePosXVar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, noisePosYVar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, noisePosZVar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, noiseVelXVar, 0.0, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, noiseVelYVar, 0.0, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, noiseVelZVar, 0.0, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, noiseOffXVar, 0.0, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, noiseOffYVar, 0.0
+            , 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, noiseOffZVar;
+        // Update covariance from one to next
+        out.cov = Eigen::MatrixXd((G * in.cov * G.transpose()) + (deltaT / 1.0) * R);
+
+        return true;
+    }
 // end of namespace pfuclt_omni_dataset
 }

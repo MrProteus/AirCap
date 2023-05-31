@@ -26,7 +26,7 @@
             <param name="OMNI3_alpha" value="0.015, 0.1, 0.5, 0.001"/> -->
             <!-- <remap to="/gtData" from="/gtData_4robotExp"/> -->
             <!-- <rosparam param="PLAYING_ROBOTS">[1, 1, 1]</rosparam> -->
-            <param name="ROB_HT" value="0.81"/>
+            <!-- <param name="ROB_HT" value="0.81"/> -->
             <param name="NUM_TARGETS" value="1"/>
             <!-- <param name="LANDMARK_COV/K1" value="0.02"/>
             <param name="LANDMARK_COV/K2" value="0.005"/>
