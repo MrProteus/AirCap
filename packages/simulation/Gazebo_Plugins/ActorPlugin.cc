@@ -20,13 +20,9 @@
 #include <ignition/math.hh>
 #include "gazebo/physics/physics.hh"
 #include "ActorPlugin.hh"
-#include "ros/ros.h"
-#include "geometry_msgs/Point.h"
 
 using namespace gazebo;
 GZ_REGISTER_MODEL_PLUGIN(ActorPlugin)
-ros::NodeHandle nh("~");
-ros::Publisher targetPublisher = nh.advertise<geometry_msgs::Point>("/target/pose",1000);
 
 #define WALKING_ANIMATION "walking"
 
@@ -253,10 +249,4 @@ void ActorPlugin::OnUpdate(const common::UpdateInfo &_info)
   this->actor->SetScriptTime(this->actor->ScriptTime() +
     (distanceTraveled * this->animationFactor));
   this->lastUpdate = _info.simTime;
-
-  geometry_msgs::Point rosMsg;
-  rosMsg.x = pose.Pos().X();
-  rosMsg.y = pose.Pos().Y();
-  rosMsg.z = pose.Pos().Z();
-  targetPublisher.publish(rosMsg);
 }
