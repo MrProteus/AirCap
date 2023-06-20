@@ -4,7 +4,7 @@ datafolder="/home/friedrich/otherdisk/"
 outputfolder="/home/friedrich/otherdisk/pf/"
 scriptfolder="/home/friedrich/catkin_ws/src/AirCap/scripts/simulation/"
 particlecount=(10 25 50 100 250 500 1000 2500)
-# particlecount=(10)
+
 # Check if folders exist and create them if not
 for ((i = 1; i <= 5; i++)); do
     folder_name=$outputfolder
@@ -27,7 +27,7 @@ for ((j = 1; j <= 5; j++)); do
     for ((i = 1; i <= 5; i++)); do
         # number of particles
         for k in "${particlecount[@]}"; do
-            roslaunch aircap_pfuclt aircap_pfuclt.launch numRobots:=$i &
+            roslaunch aircap_pfuclt aircap_pfuclt.launch numRobots:=$i particles:=$k &
             sleep 3
 
             outputfoldername=$outputfolder

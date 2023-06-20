@@ -17,6 +17,10 @@
 #include <sensor_msgs/PointCloud.h>
 #include <visualization_msgs/Marker.h>
 #include <geometry_msgs/TransformStamped.h>
+#include <geometry_msgs/PointStamped.h>
+#include <std_msgs/Float64.h>
+#include <gazebo_msgs/GetModelState.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 namespace pfuclt_omni_dataset {
 
@@ -26,16 +30,6 @@ namespace pfuclt_omni_dataset {
  */
 class PFPublisher : public ParticleFilter {
 public:
-    struct PublishData {
-        float robotHeight;
-
-        /**
-         * @brief PublishData - contains information necessary for the PFPublisher
-         * class
-         * @param robotHeight - the fixed robot height
-         */
-        PublishData(float robotHeight) : robotHeight(robotHeight) {}
-    } pubData;
 
     /**
      * @brief resize_particles - change to a different number of particles and
@@ -82,6 +76,29 @@ private:
 
     void publishTargetObservations();
 
+    void getGTTarget();
+
+    void robotGTCallback(geometry_msgs::Pose msg);
+
+    void targetGTCallback(geometry_msgs::PoseWithCovarianceStamped msg);
+
+    void robotKFCallback(uav_msgs::uav_pose msg);
+
+    void targetKFCallback(geometry_msgs::PoseWithCovarianceStamped msg);
+
+    void robotPFCallback(geometry_msgs::PoseStamped msg);
+
+    void targetPFCallback(geometry_msgs::PointStamped msg);
+
+    geometry_msgs::PoseWithCovarianceStamped gtTarget_, pfDelta_, kfDelta_;
+    double pfNorm_, kfNorm_, pfCovNorm_, kfCovNorm_;
+    std::vector<geometry_msgs::PoseWithCovarianceStamped> gtRobots_, pfRobotDeltas_, kfRobotDeltas_;
+    std::vector<double> pfRobotNorms_, kfRobotNorms_, pfRobotAngles_, kfRobotAngles_;
+    ros::Publisher pubGtTarget_, pubKfNorm_, pubPfNorm_, pubKfCov_, pubPfCov_;
+    ros::Subscriber robotGTSub_, targetGTSub_, robotKFSub_, targetKFSub_, robotPFSub_, targetPFSub_;
+    ros::ServiceClient gtService_;
+    gazebo_msgs::GetModelState srv_;
+
 public:
     /**
      * @brief PFPublisher - constructor
@@ -89,8 +106,7 @@ public:
      * ParticleFilter class
      * @param publishData - a structure with some more data for this class
      */
-    PFPublisher(struct PFinitData &data,
-                struct PublishData publishData);
+    PFPublisher(struct PFinitData &data);
 
     /**
      * @brief getPFReference - retrieve a reference to the base class's members

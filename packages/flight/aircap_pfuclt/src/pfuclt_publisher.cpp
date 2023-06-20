@@ -3,9 +3,8 @@
 
 namespace pfuclt_omni_dataset {
 
-PFPublisher::PFPublisher(struct ParticleFilter::PFinitData &data,
-                         struct PublishData publishData)
-        : ParticleFilter(data), pubData(publishData),
+PFPublisher::PFPublisher(struct ParticleFilter::PFinitData &data)
+        : ParticleFilter(data), 
           particleStdPublishers_(data.nRobots),
           robotGTPublishers_(data.nRobots), robotEstimatePublishers_(data.nRobots),
           robotBroadcasters(data.nRobots){
@@ -22,22 +21,22 @@ PFPublisher::PFPublisher(struct ParticleFilter::PFinitData &data,
 
         // Other publishers
         estimatePublisher_ =
-            nh_.advertise<read_omni_dataset::Estimate>(robotNamespace + "/pf/pfuclt_estimate", 100);
+            nh_.advertise<read_omni_dataset::Estimate>(robotNamespace + "/pf/pfuclt_estimate", 10);
         particlePublisher_ =
             nh_.advertise<pfuclt_omni_dataset::particles>(robotNamespace + "/pf/pfuclt_particles", 10);
 
         // Rviz visualization publishers
         // Target
         targetEstimatePublisher_ =
-            nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/estimatedPose", 1000);
+            nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/estimatedPose", 10);
         targetGTPublisher_ =
-            nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/gtPose", 1000);
+            nh_.advertise<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/gtPose", 10);
         targetParticlePublisher_ =
             nh_.advertise<sensor_msgs::PointCloud>(robotNamespace + "/pf/target/particles", 10);
 
         // target observations publisher
         targetObservationsPublisher_ =
-            nh_.advertise<visualization_msgs::Marker>(robotNamespace + "/pf/targetObservations", 100);
+            nh_.advertise<visualization_msgs::Marker>(robotNamespace + "/pf/targetObservations", 10);
 
     // Robots
     for (uint r = 0; r < nRobots_; ++r) {
@@ -62,11 +61,101 @@ PFPublisher::PFPublisher(struct ParticleFilter::PFinitData &data,
 #else
         robotGTPublishers_[r] = nh_.advertise<geometry_msgs::PoseStamped>(
                 robotNamespace + "/pf/" + robotName + "/gtPose", 1000);
-#endif
+#endif  
     }
+
+        // pub/sub for evaluation
+        robotGTSub_ = nh_.subscribe<geometry_msgs::Pose>("/firefly_" + boost::lexical_cast<std::string>(data.mainRobotID) + "/ground_truth/pose",10,&PFPublisher::robotGTCallback, this);
+        targetGTSub_ = nh_.subscribe<geometry_msgs::PoseWithCovarianceStamped>("/target/pose",10, &PFPublisher::targetGTCallback,this);
+        robotKFSub_ = nh_.subscribe<uav_msgs::uav_pose>(robotNamespace + "/pose", 10, &PFPublisher::robotKFCallback, this);
+        targetKFSub_ = nh_.subscribe<geometry_msgs::PoseWithCovarianceStamped>(robotNamespace + "/target_tracker/pose", 10, &PFPublisher::targetKFCallback, this);
+        robotPFSub_ = nh_.subscribe<geometry_msgs::PoseStamped>(robotNamespace + "/pf/machine_" + boost::lexical_cast<std::string>(data.mainRobotID) + "/pose", 10, &PFPublisher::robotPFCallback, this);
+        targetPFSub_ = nh_.subscribe<geometry_msgs::PointStamped>(robotNamespace + "/pf/target/estimatedPose", 10, &PFPublisher::targetPFCallback, this);
+
+        pubGtTarget_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>(robotNamespace + "/eval/gt/target", 10);
+        pubKfNorm_ = nh_.advertise<std_msgs::Float64>(robotNamespace + "/eval/kf/norm",10);
+        pubPfNorm_ = nh_.advertise<std_msgs::Float64>(robotNamespace + "/eval/pf/norm",10);
+        pubKfCov_ = nh_.advertise<std_msgs::Float64>(robotNamespace + "eval/kf/cov",10);
+        pubPfCov_ = nh_.advertise<std_msgs::Float64>(robotNamespace + "eval/pf/cov",10);
+
+    gtService_ = nh_.serviceClient<gazebo_msgs::GetModelState>("/gazebo/get_model_state");
+    srv_.request.model_name = "actor";
 
     ROS_INFO("It's a publishing particle filter!");
 }
+
+
+// void PFPublisher::getGTTarget() {
+//     if (gtService_.call(srv_)) {
+//         gazebo_msgs::GetModelState::Response modelState = srv_.response;
+//         geometry_msgs::PoseWithCovarianceStamped gtTargetMsg;
+//         gtTargetMsg.header.stamp = ros::Time::now();
+//         gtTargetMsg.pose.pose.position.x = modelState.pose.position.y;
+//         gtTargetMsg.pose.pose.position.y = modelState.pose.position.x;
+//         gtTargetMsg.pose.pose.position.z = (-1) * modelState.pose.position.z;
+//         gtTarget_ = gtTargetMsg;
+//         pubGtTarget_.publish(gtTargetMsg);
+//     }
+// }
+
+void PFPublisher::robotGTCallback(geometry_msgs::Pose msg){
+    // gtRobots_[data.mainRobotID -1] = msg;
+}
+
+void PFPublisher::targetGTCallback(geometry_msgs::PoseWithCovarianceStamped msg) {
+    gtTarget_ = msg;
+}
+
+void PFPublisher::robotKFCallback(uav_msgs::uav_pose msg) {
+
+}
+
+void PFPublisher::targetKFCallback(geometry_msgs::PoseWithCovarianceStamped msg) {
+    // getGTTarget();
+    kfDelta_.header = msg.header;
+    kfDelta_.pose.pose.position.x = msg.pose.pose.position.x - gtTarget_.pose.pose.position.x;
+    kfDelta_.pose.pose.position.y = msg.pose.pose.position.y - gtTarget_.pose.pose.position.y;
+    kfDelta_.pose.pose.position.z = msg.pose.pose.position.z - gtTarget_.pose.pose.position.z;
+    // kfDelta_.pose.pose.orientation.x = msg.pose.pose.orientation.x - gtTarget_.pose.pose.orientation.x;
+    // kfDelta_.pose.pose.orientation.y = msg.pose.pose.orientation.y - gtTarget_.pose.pose.orientation.y;
+    // kfDelta_.pose.pose.orientation.z = msg.pose.pose.orientation.z - gtTarget_.pose.pose.orientation.z;
+    // kfDelta_.pose.pose.orientation.w = msg.pose.pose.orientation.w - gtTarget_.pose.pose.orientation.w;
+    
+    kfNorm_ = sqrt(pow(kfDelta_.pose.pose.position.x,2) + pow(kfDelta_.pose.pose.position.y,2) + pow(kfDelta_.pose.pose.position.z,2));
+    std_msgs::Float64 msgNorm;
+    msgNorm.data = kfNorm_;
+    pubKfNorm_.publish(msgNorm);
+
+    double cov = msg.pose.covariance[0 * 6 + 0] + msg.pose.covariance[1 * 6 + 1] + msg.pose.covariance[2 * 6 + 2];
+    msgNorm.data = cov;
+    pubKfCov_.publish(msgNorm);
+}
+
+void PFPublisher::robotPFCallback(geometry_msgs::PoseStamped msg) {
+
+}
+
+void PFPublisher::targetPFCallback(geometry_msgs::PointStamped msg) {
+    // getGTTarget();
+    pfDelta_.header = msg.header;
+    pfDelta_.pose.pose.position.x = msg.point.x - gtTarget_.pose.pose.position.x;
+    pfDelta_.pose.pose.position.y = msg.point.y - gtTarget_.pose.pose.position.y;
+    pfDelta_.pose.pose.position.z = msg.point.z - gtTarget_.pose.pose.position.z;
+    // pfDelta_.pose.pose.orientation.x = msg.pose.pose.orientation.x - gtTarget_.pose.pose.orientation.x;
+    // pfDelta_.pose.pose.orientation.y = msg.pose.pose.orientation.y - gtTarget_.pose.pose.orientation.y;
+    // pfDelta_.pose.pose.orientation.z = msg.pose.pose.orientation.z - gtTarget_.pose.pose.orientation.z;
+    // pfDelta_.pose.pose.orientation.w = msg.pose.pose.orientation.w - gtTarget_.pose.pose.orientation.w;
+
+    pfNorm_ = sqrt(pow(pfDelta_.pose.pose.position.x,2) + pow(pfDelta_.pose.pose.position.y,2) + pow(pfDelta_.pose.pose.position.z,2));
+    std_msgs::Float64 msgNorm;
+    msgNorm.data = pfNorm_;
+    pubPfNorm_.publish(msgNorm);
+
+    // double cov = msg.pose.covariance[0 * 6 + 0] + msg.pose.covariance[1 * 6 + 1] + msg.pose.covariance[2 * 6 + 2];
+    // msgNorm.data = cov;
+    // pubPfCov_.publish(msgNorm);
+}
+
 
 void PFPublisher::publishParticles() {
     // The eval package would rather have the particles in the format

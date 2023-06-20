@@ -3,13 +3,18 @@
 
 ROBOS=$1
 
-COMSUCCESSRATE=$2
+PARTICLES=$2
 
-NAME=$3
+COMSUCCESSRATE=$3
+
+NAME=$4
 
 WORLD="arena_RAL"
 
 
+if [ -z "$PARTICLES" ]; then
+   PARTICLES=250
+fi
 
 if [ -z "$COMSUCCESSRATE" ]; then
    COMSUCCESSRATE=100
@@ -83,7 +88,7 @@ for i in $(seq 0 $(($ROBOS-1))); do
 
 	echo "Starting AIRCAP for robot $id"
         screen -d -m -S AIRCAP$id bash -i -c "roslaunch aircap simulation.launch robotID:=$id numRobots:=$ROBOS comSuccessRate:=$COMSUCCESSRATE --screen"
-		screen -d -m -S PFUCLT$id bash -i -c "roslaunch aircap_pfuclt aircap_pfuclt.launch robotID:=$id numRobots:=$ROBOS --screen"
+		
 
   sleep 1
 
@@ -104,6 +109,10 @@ for i in $(seq 0 $(($ROBOS-1))); do
 # sleep 5
 
 done
+
+# only run PF once for performance reasons
+id=1
+# screen -d -m -S PFUCLT$id bash -i -c "roslaunch aircap_pfuclt aircap_pfuclt.launch robotID:=$id numRobots:=$ROBOS particles:=$PARTICLES --screen"
 
 
 # wait 30 seconds for robots to assume position

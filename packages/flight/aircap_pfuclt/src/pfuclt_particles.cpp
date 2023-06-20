@@ -698,7 +698,7 @@ void ParticleFilter::predict(const uint robotNumber, const uav_msgs::uav_poseCon
   if (mainRobotID_ == robotNumber)
   {
     odometryTime_.updateTime(ros::WallTime::now());
-    iterationEvalTime_ = ros::WallTime::now();
+    // iterationEvalTime_ = ros::WallTime::now();
   }
   using namespace boost::random;
 
@@ -759,38 +759,38 @@ void ParticleFilter::predict(const uint robotNumber, const uav_msgs::uav_poseCon
         particles_[robot_offset + s][p] += randPar(seed_);
     }
 
-  // If this is the main robot, perform one PF-UCLT iteration
-  if (mainRobotID_ == robotNumber)
-  {
-    ROS_DEBUG("ParticleFilter::Predict: Full iteration started");
-    // Lock mutex
-    boost::mutex::scoped_lock(mutex_);
+  // // If this is the main robot, perform one PF-UCLT iteration
+  // if (mainRobotID_ == robotNumber)
+  // {
+  //   ROS_DEBUG("ParticleFilter::Predict: Full iteration started");
+  //   // Lock mutex
+  //   boost::mutex::scoped_lock(mutex_);
 
-    ROS_DEBUG("Full iteration complete");
+  //   ROS_DEBUG("Full iteration complete");
 
-    ROS_INFO("(WALL TIME) Odometry analyzed with = %fms",
-             1e3 * odometryTime_.diff);
+  //   ROS_INFO("(WALL TIME) Odometry analyzed with = %fms",
+  //            1e3 * odometryTime_.diff);
 
-    deltaIteration_ = ros::WallTime::now() - iterationEvalTime_;
-    if (deltaIteration_ > maxDeltaIteration_)
-      maxDeltaIteration_ = deltaIteration_;
+  //   deltaIteration_ = ros::WallTime::now() - iterationEvalTime_;
+  //   if (deltaIteration_ > maxDeltaIteration_)
+  //     maxDeltaIteration_ = deltaIteration_;
 
-    durationSum += deltaIteration_;
-    numberIterations++;
+  //   durationSum += deltaIteration_;
+  //   numberIterations++;
 
-    ROS_INFO_STREAM("(WALL TIME) Iteration time: "
-                    << 1e-6 * deltaIteration_.toNSec() << "ms ::: Worst case: "
-                    << 1e-6 * maxDeltaIteration_.toNSec() << "ms ::: Average: "
-                    << 1e-6 * (durationSum.toNSec() / numberIterations) << "ms");
+  //   ROS_INFO_STREAM("(WALL TIME) Iteration time: "
+  //                   << 1e-6 * deltaIteration_.toNSec() << "ms ::: Worst case: "
+  //                   << 1e-6 * maxDeltaIteration_.toNSec() << "ms ::: Average: "
+  //                   << 1e-6 * (durationSum.toNSec() / numberIterations) << "ms");
 
-    // ROS_DEBUG("Iteration: %s", iteration_oss->str().c_str());
-    // Clear ostringstream
-    iteration_oss->str("");
-    iteration_oss->clear();
+  //   // ROS_DEBUG("Iteration: %s", iteration_oss->str().c_str());
+  //   // Clear ostringstream
+  //   iteration_oss->str("");
+  //   iteration_oss->clear();
 
-    // Start next iteration
-    nextIteration();
-  }
+  //   // Start next iteration
+  //   nextIteration();
+  // }
 }
 
 
@@ -934,5 +934,76 @@ bool ParticleFilter::predictKF(const target_tracker_distributed_kf::CacheElement
 
         return true;
     }
+
+  void ParticleFilter::update(const uint robotNumber) {
+      // If this is the main robot, update the odometry time
+  if (mainRobotID_ == robotNumber)
+  {
+    // odometryTime_.updateTime(ros::WallTime::now());
+    iterationEvalTime_ = ros::WallTime::now();
+  }
+
+   // If this is the main robot, perform one PF-UCLT iteration
+  if (mainRobotID_ == robotNumber)
+  {
+    ROS_DEBUG("ParticleFilter::Predict: Full iteration started");
+    ros::WallDuration deltaFuseRobots, deltaFuseTarget, deltaResample, deltaEstimate;
+
+    // Lock mutex
+    boost::mutex::scoped_lock(mutex_);
+
+    // All the PF-UCLT steps
+    // predictTarget();
+    fuseRobots();
+    deltaFuseRobots = ros::WallTime::now() - iterationEvalTime_;
+    fuseTarget();
+    deltaFuseTarget = ros::WallTime::now() - iterationEvalTime_;
+    resample();
+    deltaResample = ros::WallTime::now() - iterationEvalTime_;
+    estimate();
+    deltaEstimate = ros::WallTime::now() - iterationEvalTime_;
+
+    ROS_DEBUG("Full iteration complete");
+
+    // ROS_INFO("(WALL TIME) Odometry analyzed with = %fms",
+    //          1e3 * odometryTime_.diff);
+
+    deltaIteration_ = ros::WallTime::now() - iterationEvalTime_;
+    if (deltaIteration_ > maxDeltaIteration_)
+      maxDeltaIteration_ = deltaIteration_;
+
+    durationSum += deltaIteration_;
+    fuseRobotsSum += deltaFuseRobots;
+    fuseTargetSum += deltaFuseTarget;
+    resampleSum += deltaResample;
+    estimateSum += deltaEstimate;
+    numberIterations++;
+
+    ROS_INFO_STREAM("(WALL TIME) Iteration time: "
+                    << 1e-6 * deltaIteration_.toNSec() << "ms ::: Worst case: "
+                    << 1e-6 * maxDeltaIteration_.toNSec() << "ms ::: Average: "
+                    << 1e-6 * (durationSum.toNSec() / numberIterations) << "ms");
+
+    ROS_INFO_STREAM("Step duration: fuseRobots: " 
+                    << 1e-6 * deltaFuseRobots.toNSec() << "ms ::: fuseTarget: "
+                    << 1e-6 * deltaFuseTarget.toNSec() << "ms ::: resample: "
+                    << 1e-6 * deltaResample.toNSec() << "ms ::: Estimate: "
+                    << 1e-6 * deltaEstimate.toNSec() << "ms");
+
+    ROS_INFO_STREAM("Average step duration: fuseRobots: " 
+                    << 1e-6 * (fuseRobotsSum.toNSec() / numberIterations) << "ms ::: fuseTarget: "
+                    << 1e-6 * (fuseTargetSum.toNSec() / numberIterations) << "ms ::: resample: "
+                    << 1e-6 * (resampleSum.toNSec() / numberIterations) << "ms ::: Estimate: "
+                    << 1e-6 * (estimateSum.toNSec() / numberIterations) << "ms");
+
+    // ROS_DEBUG("Iteration: %s", iteration_oss->str().c_str());
+    // Clear ostringstream
+    iteration_oss->str("");
+    iteration_oss->clear();
+
+    // Start next iteration
+    nextIteration();
+  }
+  }
 // end of namespace pfuclt_omni_dataset
 }

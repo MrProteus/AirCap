@@ -206,6 +206,7 @@ protected:
   struct State state_;
   ros::Time latestObservationTime_, savedLatestObservationTime_;
   bool converged_;
+  ros::WallDuration fuseRobotsSum, fuseTargetSum, resampleSum, estimateSum; 
 
   /**
    * @brief copyParticle - copies a whole particle from one particle set to
@@ -498,6 +499,8 @@ public:
    * @brief estimate - state estimation through weighted means of particle weights
    */
   void estimate();
+
+  void update(const uint robotNumber);
 
 };
 

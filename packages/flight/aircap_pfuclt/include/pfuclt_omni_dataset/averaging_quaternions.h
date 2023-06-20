@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// source: 
+// https://github.com/BobMcFry/averaging_weighted_quaternions
+
 
 #include <vector>
 #include <eigen3/Eigen/Core>

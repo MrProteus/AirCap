@@ -34,7 +34,7 @@ RobotFactory::RobotFactory(ros::NodeHandle& nh) : nh_(nh)
 
   if (PUBLISH)
     pf = boost::shared_ptr<PFPublisher>(
-        new PFPublisher(initData, PFPublisher::PublishData(ROB_HT)));
+        new PFPublisher(initData));
   else
     pf = boost::shared_ptr<ParticleFilter>(new ParticleFilter(initData));
 
@@ -197,11 +197,12 @@ void Robot::measurementCallback(const geometry_msgs::PoseWithCovarianceStamped::
   if (MY_ID == (int)robotNumber_ + 1)
     pf_->updateTargetIterationTime(msg->header.stamp);
 
-
-  pf_->fuseRobots();
-  pf_->fuseTarget();
-  pf_->resample();
-  pf_->estimate();
+  
+  // pf_->fuseRobots();
+  // pf_->fuseTarget();
+  // pf_->resample();
+  // pf_->estimate();
+  pf_->update(robotNumber_);
 }
 
 
